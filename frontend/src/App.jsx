@@ -5,27 +5,36 @@ import Sidebar from "./components/Sidebar";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Tournaments from "./pages/Tournaments";
+
 
 export default function App() {
   const [open, setOpen] = useState(false);
-  const { token } = useAuth(); // Access the token here
+  const { token } = useAuth(); 
 
   return (
     <div className="flex min-h-screen bg-black text-white font-sans overflow-x-hidden">
-      {/* 1. Sidebar only shows if there is a token */}
+      {/* Sidebar shows only if logged in */}
       {token && <Sidebar open={open} setOpen={setOpen} />} 
 
-      <Routes>
-        {/* 2. If logged in, send "/" to Home. If NOT logged in, send to Login */}
-        <Route 
-          path="/" 
-          element={token ? <Home open={open} setOpen={setOpen} /> : <Navigate to="/login" />} 
-        />
-        
-        {/* 3. Login and Register are only for users WITHOUT a token */}
-        <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
-        <Route path="/register" element={!token ? <Register /> : <Navigate to="/" />} />
-      </Routes>
+      <main className="flex-1"> {/* Added a main wrapper for layout consistency */}
+        <Routes>
+          {/* Main Home Route */}
+          <Route 
+            path="/" 
+            element={token ? <Home open={open} setOpen={setOpen} /> : <Navigate to="/login" />} 
+          />
+          
+          {/* 🏆 NEW: Protected Tournaments Route */}
+          <Route 
+  path="/tournaments" 
+  element={token ? <Tournaments setOpen={setOpen} /> : <Navigate to="/login" />} 
+/>
+
+          <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
+          <Route path="/register" element={!token ? <Register /> : <Navigate to="/" />} />
+        </Routes>
+      </main>
     </div>
   );
 }

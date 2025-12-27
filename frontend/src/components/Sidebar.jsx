@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom"; // 1. Added Link here
 import { useAuth } from "../context/AuthContext";
 
 export default function Sidebar({ open, setOpen }) {
@@ -35,12 +35,17 @@ export default function Sidebar({ open, setOpen }) {
 
         <nav className="flex-1 space-y-2">
           {["Home", "Tournaments", "Profile"].map((item) => (
-            <div
-              key={item}
-              className="px-4 py-3 text-[#b3b3b3] hover:text-white rounded-lg hover:bg-white/5 cursor-pointer"
+            // 2. Added Link wrapper and setOpen(false) to close menu on click
+            <Link 
+              key={item} 
+              to={item === "Home" ? "/" : `/${item.toLowerCase()}`}
+              onClick={() => setOpen(false)} 
+              className="block"
             >
-              {item}
-            </div>
+              <div className="px-4 py-3 text-[#b3b3b3] hover:text-white rounded-lg hover:bg-white/5 cursor-pointer">
+                {item}
+              </div>
+            </Link>
           ))}
         </nav>
 
