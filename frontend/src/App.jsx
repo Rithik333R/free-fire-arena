@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Routes, Route, Navigate } from "react-router-dom"; // Import these!
-import { useAuth } from "./context/AuthContext";           // Import this!
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
 import Sidebar from "./components/Sidebar";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Tournaments from "./pages/Tournaments";
-
+import TournamentDetail from "./pages/TournamentDetail";
 
 export default function App() {
   const [open, setOpen] = useState(false);
@@ -14,25 +14,28 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-black text-white font-sans overflow-x-hidden">
-      {/* Sidebar shows only if logged in */}
+      {/* 1. Sidebar: Only visible when a user is logged in */}
       {token && <Sidebar open={open} setOpen={setOpen} />} 
 
-      <main className="flex-1"> {/* Added a main wrapper for layout consistency */}
+      {/* 2. Main Content Area */}
+      <main className="flex-1"> 
         <Routes>
-          {/* Main Home Route */}
+          {/* --- DASHBOARD ROUTE --- */}
           <Route 
             path="/" 
             element={token ? <Home open={open} setOpen={setOpen} /> : <Navigate to="/login" />} 
           />
           
-          {/* 🏆 NEW: Protected Tournaments Route */}
-          <Route 
-  path="/tournaments" 
-  element={token ? <Tournaments setOpen={setOpen} /> : <Navigate to="/login" />} 
-/>
+         {/* --- TOURNAMENT LIST PAGE --- */}
+          <Route path="/tournaments" element={<Tournaments setOpen={setOpen} />} />
+<Route path="/tournaments/view/:id" element={<TournamentDetail setOpen={setOpen} />} />
 
+          {/* --- AUTH ROUTES --- */}
           <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
           <Route path="/register" element={!token ? <Register /> : <Navigate to="/" />} />
+
+          {/* Fallback: Redirect any unknown path to home */}
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
     </div>
