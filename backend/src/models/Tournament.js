@@ -3,14 +3,14 @@ import mongoose from "mongoose";
 const tournamentSchema = new mongoose.Schema({
   title: { type: String, required: true },
   game: { type: String, default: "Free Fire" },
-  matchType: { type: String, enum: ["1v1", "2v2", "3v3", "4v4"], default: "4v4" }, // Added for Clash Squad
-  map: { type: String, default: "Bermuda" }, // Added
-  description: { type: String, default: "Standard Clash Squad Tournament" }, // Added
+  matchType: { type: String, enum: ["1v1", "2v2", "3v3", "4v4"], default: "4v4" },
+  map: { type: String, default: "Bermuda" },
+  description: { type: String, default: "Standard Clash Squad Tournament" },
   rules: { 
     type: [String], 
     default: ["No Hacks", "No Grenades", "Join 15 mins before"] 
-  }, // Added as an array for easy listing
-  banner: { type: String, default: "https://wallpaperaccess.com/full/2155823.jpg" }, // Added
+  },
+  banner: { type: String, default: "https://wallpaperaccess.com/full/2155823.jpg" },
 
   startTime: { type: Date, required: true },
   endTime: { type: Date, required: true },
@@ -23,7 +23,16 @@ const tournamentSchema = new mongoose.Schema({
     enum: ["UPCOMING", "LIVE", "COMPLETED"],
     default: "UPCOMING",
   },
-  participants: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+  // UPDATED: Participants now store IGN and UID for match verification
+  participants: [
+    {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      ign: { type: String, required: true },
+      uid: { type: String, required: true },
+      joinedAt: { type: Date, default: Date.now }
+    }
+  ],
   
   // SECURE FIELDS (Hidden by default)
   roomId: { type: String, select: false }, 

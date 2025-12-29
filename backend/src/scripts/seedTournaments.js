@@ -23,8 +23,8 @@ async function seed() {
         map: "Bermuda (Remastered)",
         description: "Weekly Clash Squad tournament for high-tier players. No double vector allowed.",
         rules: ["No Double Vector", "No Grenades", "PC Players Allowed: No", "Fair Play Only"],
-        startTime: new Date(Date.now() + 120 * 60 * 1000), // 2 hours from now
-        endTime: new Date(Date.now() + 180 * 60 * 1000),
+        startTime: new Date(Date.now() + 1440 * 60 * 1000), // Exactly 24 hours from now
+  endTime: new Date(Date.now() + 1500 * 60 * 1000),
         prizePool: 1000,
         maxPlayers: 8,
         status: "UPCOMING",

@@ -1,202 +1,243 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
-export default function TournamentDetail({ setOpen }) {
+export default function TournamentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [match, setMatch] = useState(null);
   const [loading, setLoading] = useState(true);
-  
-  // 🕒 Countdown State
   const [timeLeft, setTimeLeft] = useState("");
+  
+  // Modal & Form State
+  const [showModal, setShowModal] = useState(false);
+  const [formData, setFormData] = useState({ ign: "", uid: "" });
+  const [joining, setJoining] = useState(false);
+
+  const fetchMatch = async () => {
+    try {
+      const res = await axios.get(`http://localhost:5000/api/tournaments/${id}`);
+      setMatch(res.data);
+      setLoading(false);
+    } catch (err) {
+      console.error("Fetch Error:", err);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Fetch specific tournament by ID
-    axios.get(`http://localhost:5000/api/tournaments/${id}`)
-      .then((res) => {
-        setMatch(res.data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Fetch Error:", err);
-        setLoading(false);
-      });
+    fetchMatch();
   }, [id]);
 
-  // 🕒 Countdown Timer Logic
   useEffect(() => {
     if (!match || match.status !== "UPCOMING") {
         if (match?.status === "LIVE") setTimeLeft("MATCH IS LIVE");
         if (match?.status === "COMPLETED") setTimeLeft("MATCH ENDED");
         return;
     }
-
     const timer = setInterval(() => {
-      const now = new Date().getTime();
-      const startTime = new Date(match.startTime).getTime();
-      const distance = startTime - now;
-
+      const distance = new Date(match.startTime).getTime() - new Date().getTime();
       if (distance < 0) {
         setTimeLeft("MATCH STARTED");
         clearInterval(timer);
       } else {
-        const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+        const h = Math.floor((distance % 86400000) / 3600000);
+        const m = Math.floor((distance % 3600000) / 60000);
+        const s = Math.floor((distance % 60000) / 1000);
+        setTimeLeft(`${h}h ${m}m ${s}s`);
       }
     }, 1000);
-
     return () => clearInterval(timer);
   }, [match]);
 
-  if (loading) return (
-    <div className="min-h-screen bg-black flex flex-col items-center justify-center">
-      <div className="w-12 h-12 border-4 border-[#1DB954] border-t-transparent rounded-full animate-spin mb-4"></div>
-      <p className="text-[#1DB954] font-black tracking-widest text-xs animate-pulse uppercase">Syncing Arena Data...</p>
-    </div>
-  );
+  const handleJoin = async (e) => {
+    e.preventDefault();
+    setJoining(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(
+        `http://localhost:5000/api/tournaments/${id}/join`,
+        formData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert("Successfully joined the Arena!");
+      setShowModal(false);
+      fetchMatch(); 
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to join");
+    } finally {
+      setJoining(false);
+    }
+  };
 
+  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-[#1DB954] font-black tracking-widest">LOADING...</div>;
   if (!match) return <div className="p-20 text-white text-center font-bold">MATCH NOT FOUND</div>;
 
+  // Auth check for button state
+  const token = localStorage.getItem("token");
+  const userId = token ? JSON.parse(atob(token.split('.')[1])).id : null;
+  const isJoined = match.participants?.some(p => p.user === userId || p.user?._id === userId);
+
   return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-12 selection:bg-[#1DB954] selection:text-black">
-      
-      {/* --- TOP BAR --- */}
-      <div className="max-w-6xl mx-auto flex justify-between items-center mb-10">
-        <button 
-          onClick={() => navigate(-1)} 
-          className="text-[#b3b3b3] hover:text-[#1DB954] font-black flex items-center gap-2 transition-all uppercase text-[10px] tracking-widest group"
-        >
-          <span className="group-hover:-translate-x-1 transition-transform">←</span> ARENA LOBBY
+    <div className="min-h-screen bg-black text-white p-4 md:p-12">
+      <div className="max-w-6xl mx-auto mb-8">
+        <button onClick={() => navigate(-1)} className="text-xs font-black text-white/40 hover:text-[#1DB954] transition-colors flex items-center gap-2">
+          ← ARENA LOBBY
         </button>
-        
-        {setOpen && (
-          <button 
-            onClick={() => setOpen(true)}
-            className="md:hidden bg-[#1DB954]/10 text-[#1DB954] p-2 rounded-lg border border-[#1DB954]/20"
-          >
-            ☰
-          </button>
-        )}
       </div>
 
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-10">
         
-        {/* LEFT SECTION: Banner, Stats & Rules */}
+        {/* LEFT COLUMN: BANNER & DETAILS */}
         <div className="lg:col-span-2 space-y-8">
           
-          {/* Hero Banner */}
+          {/* BANNER */}
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative h-64 md:h-80 rounded-[2.5rem] overflow-hidden border border-white/10 shadow-2xl"
+            className="relative h-[300px] md:h-[400px] rounded-[3.5rem] overflow-hidden shadow-2xl border border-white/5"
           >
-            <img 
-              src={match.banner || "https://wallpaperaccess.com/full/2155823.jpg"} 
-              className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform duration-700"
-              alt="Tournament Banner"
-            />
+            <img src={match.banner} alt="banner" className="w-full h-full object-cover opacity-60" />
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-            <div className="absolute bottom-8 left-8 right-8">
+            <div className="absolute bottom-10 left-10">
               <div className="flex gap-2 mb-4">
-                <span className="bg-[#1DB954] text-black text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg">
-                  {match.status}
-                </span>
-                <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest border border-white/10">
-                  {match.matchType || "4v4"}
-                </span>
+                <span className="bg-[#1DB954] text-black text-[10px] font-black px-3 py-1 rounded-full uppercase">{match.status}</span>
+                <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full uppercase">{match.matchType}</span>
               </div>
-              <h1 className="text-4xl md:text-7xl font-black uppercase italic tracking-tighter leading-[0.85] drop-shadow-2xl">
-                {match.title}
-              </h1>
+              <h1 className="text-5xl md:text-7xl font-black uppercase italic tracking-tighter leading-none">{match.title}</h1>
             </div>
           </motion.div>
 
-          {/* Quick Stats */}
+          {/* STATS GRID */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: "PRIZE POOL", value: `₹${match.prizePool}`, color: "text-[#1DB954]" },
-              { label: "ENTRY FEE", value: match.entryFee === 0 ? "FREE" : `₹${match.entryFee}`, color: "text-white" },
-              { label: "MAP", value: match.map || "BERMUDA", color: "text-white" },
-              { label: "VERSION", value: "MOBILE", color: "text-white" },
+              { label: "PRIZE POOL", val: `₹${match.prizePool}`, color: "text-[#1DB954]" },
+              { label: "ENTRY FEE", val: match.entryFee === 0 ? "FREE" : `₹${match.entryFee}` },
+              { label: "MAP", val: match.map },
+              { label: "VERSION", val: "MOBILE" }
             ].map((stat, i) => (
-              <div key={i} className="bg-[#121212] p-5 rounded-2xl border border-white/5 hover:bg-white/[0.02] transition-colors">
-                <p className="text-[#666] text-[10px] font-black uppercase mb-1 tracking-widest">{stat.label}</p>
-                <p className={`text-xl font-black ${stat.color}`}>{stat.value}</p>
+              <div key={i} className="bg-[#121212] border border-white/5 p-6 rounded-3xl">
+                <p className="text-[10px] font-black text-white/40 mb-1 uppercase tracking-widest">{stat.label}</p>
+                <p className={`text-xl font-black uppercase italic ${stat.color || "text-white"}`}>{stat.val}</p>
               </div>
             ))}
           </div>
 
-          {/* Match Rules */}
-          <section className="bg-[#121212] p-8 rounded-[2.5rem] border border-white/5">
-            <h2 className="text-xl font-black mb-8 uppercase flex items-center gap-3 tracking-tighter">
-              <span className="w-1.5 h-6 bg-[#1DB954] rounded-full"></span>
-              Official Match Rules
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {match.rules?.map((rule, index) => (
-                <div key={index} className="flex items-center gap-4 p-4 bg-white/[0.03] rounded-2xl border border-white/5 group hover:border-[#1DB954]/40 transition-all">
-                  <span className="text-[#1DB954] font-black text-xl italic opacity-30 group-hover:opacity-100 transition-opacity">
-                    {index + 1 < 10 ? `0${index + 1}` : index + 1}
-                  </span>
-                  <p className="text-sm font-bold text-[#b3b3b3] group-hover:text-white uppercase tracking-tight leading-tight">{rule}</p>
-                </div>
+          {/* RULES SECTION */}
+          <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem]">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-1 h-6 bg-[#1DB954] rounded-full" />
+              <h2 className="text-xl font-black uppercase italic tracking-tight">OFFICIAL MATCH RULES</h2>
+            </div>
+            <ul className="space-y-4">
+              {match.rules?.map((rule, idx) => (
+                <li key={idx} className="flex gap-4 text-sm font-bold text-white/70">
+                  <span className="text-[#1DB954]">0{idx + 1}</span> {rule}
+                </li>
               ))}
-            </div>
-          </section>
-        </div>
-
-        {/* RIGHT SECTION: Action Sidebar */}
-        <div className="space-y-6">
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="bg-[#1DB954] p-8 rounded-[3rem] text-black shadow-[0_20px_60px_rgba(29,185,84,0.25)] sticky top-8"
-          >
-            <h3 className="font-black text-4xl uppercase italic leading-none mb-1 tracking-tighter">JOIN ARENA</h3>
-            <p className="font-black text-[10px] opacity-60 mb-8 uppercase tracking-[0.2em]">
-              SLOTS: {match.participants?.length || 0} / {match.maxPlayers}
-            </p>
-
-            <button className="w-full bg-black text-white font-black py-5 rounded-2xl hover:scale-95 transition-all uppercase tracking-[0.15em] text-xs shadow-2xl mb-8 group">
-              REGISTER <span className="inline-block group-hover:translate-x-1 transition-transform">→</span>
-            </button>
-
-            <div className="space-y-4">
-               <div className="flex justify-between items-center py-2 border-b border-black/10">
-                 <span className="text-[10px] font-black uppercase opacity-60">Status</span>
-                 <span className="font-black text-xs uppercase tracking-widest">{match.status}</span>
-               </div>
-               <div className="flex justify-between items-center py-2 border-b border-black/10">
-                 <span className="text-[10px] font-black uppercase opacity-60">Kickoff Time</span>
-                 <span className="font-black text-xs">
-                   {new Date(match.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
-                 </span>
-               </div>
-            </div>
-          </motion.div>
-          
-          {/* Real-time Countdown Box */}
-          <div className="bg-[#121212] border border-yellow-500/20 p-8 rounded-[3rem] flex flex-col items-center text-center">
-             <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-2 bg-yellow-500 rounded-full animate-ping"></div>
-                <h4 className="text-yellow-500 font-black text-[10px] uppercase tracking-[0.2em]">ROOM ACCESS</h4>
-             </div>
-             
-             <p className="text-4xl font-black text-white mb-4 font-mono tracking-tighter tabular-nums">
-                {timeLeft}
-             </p>
-             
-             <p className="text-[#666] text-[10px] font-bold leading-relaxed uppercase max-w-[200px]">
-               ID and Password will be revealed here 15 mins before start.
-             </p>
+            </ul>
           </div>
         </div>
 
+        {/* RIGHT COLUMN: JOIN CARD & TIMER */}
+        <div className="space-y-6">
+          {/* JOIN CARD */}
+          <motion.div className="bg-[#1DB954] p-8 rounded-[3rem] text-black shadow-2xl">
+            <h3 className="font-black text-4xl uppercase italic mb-1 tracking-tighter">JOIN ARENA</h3>
+            <p className="font-black text-[10px] opacity-60 mb-8 uppercase tracking-widest">
+              SLOTS: {match.participants?.length || 0} / {match.maxPlayers}
+            </p>
+
+            {isJoined ? (
+              <button disabled className="w-full bg-black/10 text-black border-2 border-black/10 font-black py-5 rounded-2xl uppercase text-xs">
+                ✅ ALREADY REGISTERED
+              </button>
+            ) : match.status !== "UPCOMING" ? (
+              <button disabled className="w-full bg-red-600/20 text-black/50 font-black py-5 rounded-2xl uppercase text-xs">
+                REGISTRATION CLOSED
+              </button>
+            ) : (
+              <button 
+                onClick={() => setShowModal(true)}
+                className="w-full bg-black text-white font-black py-5 rounded-2xl hover:scale-95 transition-all uppercase text-xs"
+              >
+                REGISTER NOW →
+              </button>
+            )}
+
+            <div className="mt-6 pt-6 border-t border-black/5 flex justify-between items-center opacity-70">
+              <span className="text-[10px] font-black uppercase">Status</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">{match.status}</span>
+            </div>
+          </motion.div>
+
+          {/* TIMER BOX */}
+          <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem] text-center shadow-xl">
+            <p className="text-[10px] font-black text-[#FFD700] mb-4 uppercase flex items-center justify-center gap-2">
+              <span className="w-2 h-2 bg-[#FFD700] rounded-full animate-pulse" /> ROOM ACCESS
+            </p>
+            <h2 className="text-4xl font-black italic tracking-tighter mb-2">{timeLeft}</h2>
+            <p className="text-[10px] font-bold text-white/30 uppercase leading-relaxed">
+              ID AND PASSWORD WILL BE REVEALED<br />HERE 15 MINS BEFORE START.
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* REGISTRATION MODAL */}
+      <AnimatePresence>
+        {showModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#121212] border border-white/10 p-10 rounded-[3rem] max-w-md w-full shadow-2xl"
+            >
+              <h2 className="text-3xl font-black uppercase italic mb-2 tracking-tight">ARENA ENTRY</h2>
+              <p className="text-[#666] text-[10px] font-bold uppercase mb-8 tracking-widest">Enter your details carefully.</p>
+              
+              <form onSubmit={handleJoin} className="space-y-5">
+                <div>
+                  <label className="text-[9px] font-black uppercase text-[#1DB954] ml-2 tracking-widest">In-Game Name (IGN)</label>
+                  <input 
+                    required
+                    className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954] transition-all"
+                    placeholder="e.g. SKYLORD_07"
+                    onChange={(e) => setFormData({...formData, ign: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase text-[#1DB954] ml-2 tracking-widest">Player UID</label>
+                  <input 
+                    required
+                    className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954] transition-all"
+                    placeholder="e.g. 283940122"
+                    onChange={(e) => setFormData({...formData, uid: e.target.value})}
+                  />
+                </div>
+                <div className="flex gap-3 pt-6">
+                  <button 
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    className="flex-1 bg-white/5 text-white/40 font-black py-4 rounded-2xl uppercase text-[10px] hover:text-white transition-all"
+                  >
+                    CANCEL
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={joining}
+                    className="flex-1 bg-[#1DB954] text-black font-black py-4 rounded-2xl uppercase text-[10px] shadow-lg shadow-[#1DB954]/20"
+                  >
+                    {joining ? "JOINING..." : "CONFIRM ENTRY"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
