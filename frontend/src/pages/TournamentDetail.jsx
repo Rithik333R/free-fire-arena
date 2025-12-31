@@ -10,14 +10,17 @@ export default function TournamentDetail() {
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState("");
   
-  // Modal & Form State
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ ign: "", uid: "" });
   const [joining, setJoining] = useState(false);
 
+  // Fetch match details - Updated to send Token for Reveal Logic
   const fetchMatch = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/tournaments/${id}`);
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`http://localhost:5000/api/tournaments/${id}`, {
+        headers: { Authorization: token ? `Bearer ${token}` : "" }
+      });
       setMatch(res.data);
       setLoading(false);
     } catch (err) {
@@ -36,18 +39,27 @@ export default function TournamentDetail() {
         if (match?.status === "COMPLETED") setTimeLeft("MATCH ENDED");
         return;
     }
+
     const timer = setInterval(() => {
       const distance = new Date(match.startTime).getTime() - new Date().getTime();
+      
       if (distance < 0) {
         setTimeLeft("MATCH STARTED");
         clearInterval(timer);
+        fetchMatch(); // Final refresh when match starts
       } else {
         const h = Math.floor((distance % 86400000) / 3600000);
         const m = Math.floor((distance % 3600000) / 60000);
         const s = Math.floor((distance % 60000) / 1000);
         setTimeLeft(`${h}h ${m}m ${s}s`);
+
+        // AUTO-REFRESH LOGIC: Re-fetch data exactly at the 15-minute mark to reveal ID/Pass
+        if (h === 0 && m === 15 && s === 0) {
+          fetchMatch();
+        }
       }
     }, 1000);
+
     return () => clearInterval(timer);
   }, [match]);
 
@@ -71,10 +83,9 @@ export default function TournamentDetail() {
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-[#1DB954] font-black tracking-widest">LOADING...</div>;
-  if (!match) return <div className="p-20 text-white text-center font-bold">MATCH NOT FOUND</div>;
+  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-[#1DB954] font-black tracking-widest">LOADING ARENA...</div>;
+  if (!match) return <div className="p-20 text-white text-center font-bold uppercase">Match Not Found</div>;
 
-  // Auth check for button state
   const token = localStorage.getItem("token");
   const userId = token ? JSON.parse(atob(token.split('.')[1])).id : null;
   const isJoined = match.participants?.some(p => p.user === userId || p.user?._id === userId);
@@ -89,15 +100,9 @@ export default function TournamentDetail() {
 
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-10">
         
-        {/* LEFT COLUMN: BANNER & DETAILS */}
+        {/* LEFT COLUMN */}
         <div className="lg:col-span-2 space-y-8">
-          
-          {/* BANNER */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="relative h-[300px] md:h-[400px] rounded-[3.5rem] overflow-hidden shadow-2xl border border-white/5"
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="relative h-[300px] md:h-[400px] rounded-[3.5rem] overflow-hidden shadow-2xl border border-white/5">
             <img src={match.banner} alt="banner" className="w-full h-full object-cover opacity-60" />
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
             <div className="absolute bottom-10 left-10">
@@ -109,7 +114,6 @@ export default function TournamentDetail() {
             </div>
           </motion.div>
 
-          {/* STATS GRID */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: "PRIZE POOL", val: `₹${match.prizePool}`, color: "text-[#1DB954]" },
@@ -124,7 +128,6 @@ export default function TournamentDetail() {
             ))}
           </div>
 
-          {/* RULES SECTION */}
           <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem]">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-1 h-6 bg-[#1DB954] rounded-full" />
@@ -140,9 +143,8 @@ export default function TournamentDetail() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: JOIN CARD & TIMER */}
+        {/* RIGHT COLUMN */}
         <div className="space-y-6">
-          {/* JOIN CARD */}
           <motion.div className="bg-[#1DB954] p-8 rounded-[3rem] text-black shadow-2xl">
             <h3 className="font-black text-4xl uppercase italic mb-1 tracking-tighter">JOIN ARENA</h3>
             <p className="font-black text-[10px] opacity-60 mb-8 uppercase tracking-widest">
@@ -151,87 +153,70 @@ export default function TournamentDetail() {
 
             {isJoined ? (
               <button disabled className="w-full bg-black/10 text-black border-2 border-black/10 font-black py-5 rounded-2xl uppercase text-xs">
-                ✅ ALREADY REGISTERED
+                ✅ REGISTERED
               </button>
             ) : match.status !== "UPCOMING" ? (
               <button disabled className="w-full bg-red-600/20 text-black/50 font-black py-5 rounded-2xl uppercase text-xs">
                 REGISTRATION CLOSED
               </button>
             ) : (
-              <button 
-                onClick={() => setShowModal(true)}
-                className="w-full bg-black text-white font-black py-5 rounded-2xl hover:scale-95 transition-all uppercase text-xs"
-              >
+              <button onClick={() => setShowModal(true)} className="w-full bg-black text-white font-black py-5 rounded-2xl hover:scale-95 transition-all uppercase text-xs">
                 REGISTER NOW →
               </button>
             )}
-
-            <div className="mt-6 pt-6 border-t border-black/5 flex justify-between items-center opacity-70">
-              <span className="text-[10px] font-black uppercase">Status</span>
-              <span className="text-[10px] font-black uppercase tracking-widest">{match.status}</span>
-            </div>
           </motion.div>
 
-          {/* TIMER BOX */}
+          {/* DYNAMIC ROOM ACCESS BOX */}
           <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem] text-center shadow-xl">
             <p className="text-[10px] font-black text-[#FFD700] mb-4 uppercase flex items-center justify-center gap-2">
-              <span className="w-2 h-2 bg-[#FFD700] rounded-full animate-pulse" /> ROOM ACCESS
+              <span className="w-2 h-2 bg-[#FFD700] rounded-full animate-pulse" /> 
+              {match.roomId && match.roomId !== "REVEALING SOON" ? "ROOM IS READY" : "ROOM ACCESS"}
             </p>
-            <h2 className="text-4xl font-black italic tracking-tighter mb-2">{timeLeft}</h2>
-            <p className="text-[10px] font-bold text-white/30 uppercase leading-relaxed">
-              ID AND PASSWORD WILL BE REVEALED<br />HERE 15 MINS BEFORE START.
-            </p>
+
+            {/* Check if Room ID is actually revealed from Backend */}
+            {match.roomId && match.roomId !== "REVEALING SOON" ? (
+              <div className="space-y-4 py-2">
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+                  <p className="text-[9px] text-white/40 font-black uppercase mb-1">Room ID</p>
+                  <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomId}</p>
+                </div>
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+                  <p className="text-[9px] text-white/40 font-black uppercase mb-1">Password</p>
+                  <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomPassword}</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h2 className="text-4xl font-black italic tracking-tighter mb-2">{timeLeft}</h2>
+                <p className="text-[10px] font-bold text-white/30 uppercase leading-relaxed">
+                  {isJoined 
+                    ? "ID AND PASSWORD WILL BE REVEALED HERE 15 MINS BEFORE START."
+                    : "YOU MUST REGISTER TO ACCESS ROOM DETAILS."}
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* REGISTRATION MODAL */}
+      {/* MODAL */}
       <AnimatePresence>
         {showModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-[#121212] border border-white/10 p-10 rounded-[3rem] max-w-md w-full shadow-2xl"
-            >
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#121212] border border-white/10 p-10 rounded-[3rem] max-w-md w-full shadow-2xl">
               <h2 className="text-3xl font-black uppercase italic mb-2 tracking-tight">ARENA ENTRY</h2>
-              <p className="text-[#666] text-[10px] font-bold uppercase mb-8 tracking-widest">Enter your details carefully.</p>
-              
               <form onSubmit={handleJoin} className="space-y-5">
                 <div>
                   <label className="text-[9px] font-black uppercase text-[#1DB954] ml-2 tracking-widest">In-Game Name (IGN)</label>
-                  <input 
-                    required
-                    className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954] transition-all"
-                    placeholder="e.g. SKYLORD_07"
-                    onChange={(e) => setFormData({...formData, ign: e.target.value})}
-                  />
+                  <input required className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954]" placeholder="e.g. SKYLORD_07" onChange={(e) => setFormData({...formData, ign: e.target.value})} />
                 </div>
                 <div>
                   <label className="text-[9px] font-black uppercase text-[#1DB954] ml-2 tracking-widest">Player UID</label>
-                  <input 
-                    required
-                    className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954] transition-all"
-                    placeholder="e.g. 283940122"
-                    onChange={(e) => setFormData({...formData, uid: e.target.value})}
-                  />
+                  <input required className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954]" placeholder="e.g. 283940122" onChange={(e) => setFormData({...formData, uid: e.target.value})} />
                 </div>
                 <div className="flex gap-3 pt-6">
-                  <button 
-                    type="button"
-                    onClick={() => setShowModal(false)}
-                    className="flex-1 bg-white/5 text-white/40 font-black py-4 rounded-2xl uppercase text-[10px] hover:text-white transition-all"
-                  >
-                    CANCEL
-                  </button>
-                  <button 
-                    type="submit"
-                    disabled={joining}
-                    className="flex-1 bg-[#1DB954] text-black font-black py-4 rounded-2xl uppercase text-[10px] shadow-lg shadow-[#1DB954]/20"
-                  >
-                    {joining ? "JOINING..." : "CONFIRM ENTRY"}
-                  </button>
+                  <button type="button" onClick={() => setShowModal(false)} className="flex-1 bg-white/5 text-white/40 font-black py-4 rounded-2xl uppercase text-[10px]">CANCEL</button>
+                  <button type="submit" disabled={joining} className="flex-1 bg-[#1DB954] text-black font-black py-4 rounded-2xl uppercase text-[10px]">{joining ? "JOINING..." : "CONFIRM ENTRY"}</button>
                 </div>
               </form>
             </motion.div>

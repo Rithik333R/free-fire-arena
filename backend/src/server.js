@@ -5,6 +5,7 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import tournamentRoutes from "./routes/tournament.routes.js"; // Only keep this one!
+import adminRoutes from "./routes/admin.routes.js";
 
 dotenv.config();
 connectDB();
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/tournaments", tournamentRoutes); // This stays
+app.use("/api/admin", adminRoutes); // 2. Register the admin endpoint
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

@@ -1,30 +1,71 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import Tournament from "../models/Tournament.js"; // 👈 This was missing or misplaced
+import bcrypt from "bcryptjs";
+import Tournament from "../models/Tournament.js"; 
+import User from "../models/User.js"; 
 
 dotenv.config();
 
-// 1. Connect to Database
 await mongoose.connect(process.env.MONGO_URI);
 console.log("📡 Connected to MongoDB for seeding...");
 
 async function seed() {
   try {
-    // 2. Clear existing tournaments to avoid duplicates
+    // 1. Clear existing data
     await Tournament.deleteMany();
-    console.log("🗑️ Old tournaments cleared.");
+    await User.deleteMany();
+    console.log("🗑️ Old tournaments and users cleared.");
 
-    // 3. Insert fresh data with the new professional fields
+    // 2. Create Hashed Passwords
+    const adminPassword = await bcrypt.hash("admin123", 10);
+    const playerPassword = await bcrypt.hash("player123", 10);
+
+    // 3. Create Admin User
+    const adminUser = new User({
+      username: "Rithik_Admin",
+      email: "admin@test.com",
+      password: adminPassword,
+      role: "ADMIN"
+    });
+    await adminUser.save();
+    console.log("👑 Admin account created: admin@test.com / admin123");
+
+    // 4. Create Regular Player
+    const regularUser = new User({
+      username: "testplayer",
+      email: "test@gmail.com",
+      password: playerPassword,
+      role: "USER",
+      fairPlayScore: 100
+    });
+    await regularUser.save();
+
+    // 5. Insert Tournaments
     await Tournament.insertMany([
+      {
+        title: "Reveal Test Match",
+        game: "Free Fire",
+        matchType: "4v4",
+        map: "Kalahari",
+        description: "TEST MATCH: Starts in 10 minutes. ID should appear for participants!",
+        rules: ["Logic Test", "Verify Room ID appearance"],
+        startTime: new Date(Date.now() + 10 * 60 * 1000), 
+        endTime: new Date(Date.now() + 60 * 60 * 1000),
+        prizePool: 500,
+        maxPlayers: 8,
+        status: "UPCOMING",
+        roomId: "AX-7788990", 
+        roomPassword: "JOIN_QUICK_123",
+        participants: [{ user: adminUser._id, ign: "ADMIN_PRO", uid: "123456789" }]
+      },
       {
         title: "CS 4v4 Sunday Cup",
         game: "Free Fire",
         matchType: "4v4",
         map: "Bermuda (Remastered)",
-        description: "Weekly Clash Squad tournament for high-tier players. No double vector allowed.",
-        rules: ["No Double Vector", "No Grenades", "PC Players Allowed: No", "Fair Play Only"],
-        startTime: new Date(Date.now() + 1440 * 60 * 1000), // Exactly 24 hours from now
-  endTime: new Date(Date.now() + 1500 * 60 * 1000),
+        description: "Weekly Clash Squad tournament.",
+        startTime: new Date(Date.now() + 1440 * 60 * 1000), 
+        endTime: new Date(Date.now() + 1500 * 60 * 1000),
         prizePool: 1000,
         maxPlayers: 8,
         status: "UPCOMING",
@@ -34,9 +75,8 @@ async function seed() {
         game: "Free Fire",
         matchType: "1v1",
         map: "Factory",
-        description: "Classic Factory roof challenge. 1v1 limited ammo.",
-        rules: ["M1887 Only", "No Glitch", "First to 7 Rounds", "Limited Ammo: Yes"],
-        startTime: new Date(Date.now() - 30 * 60 * 1000), // Started 30 mins ago
+        description: "Classic Factory roof challenge.",
+        startTime: new Date(Date.now() - 30 * 60 * 1000), 
         endTime: new Date(Date.now() + 30 * 60 * 1000),
         prizePool: 200,
         maxPlayers: 2,
@@ -47,9 +87,8 @@ async function seed() {
         game: "Free Fire",
         matchType: "1v1",
         map: "Purgatory",
-        description: "Casual warmup match before the main league starts.",
-        rules: ["Classic Rules", "All Weapons Allowed"],
-        startTime: new Date(Date.now() - 300 * 60 * 1000), // Finished 5 hours ago
+        description: "Casual warmup match.",
+        startTime: new Date(Date.now() - 300 * 60 * 1000), 
         endTime: new Date(Date.now() - 240 * 60 * 1000),
         prizePool: 0,
         maxPlayers: 48,
@@ -57,11 +96,10 @@ async function seed() {
       }
     ]);
 
-    console.log("✅ Database successfully seeded with professional matches!");
+    console.log("✅ Database successfully seeded with Admin and Test Cases!");
   } catch (error) {
     console.error("❌ Seeding failed:", error);
   } finally {
-    // 4. Always close the connection when done
     mongoose.connection.close();
     process.exit();
   }

@@ -1,86 +1,87 @@
 import express from "express";
 import Tournament from "../models/Tournament.js";
-import authMiddleware from "../middleware/auth.middleware.js"; 
+import authMiddleware from "../middleware/auth.middleware.js";
+import jwt from "jsonwebtoken";
 
 const router = express.Router();
 
-// @route   GET /api/tournaments
-// @desc    Get all tournaments for the Lobby
+// 1. PUBLIC: Get all tournaments for the Lobby
 router.get("/", async (req, res) => {
   try {
     const tournaments = await Tournament.find().sort({ startTime: 1 });
     res.json(tournaments);
   } catch (err) {
-    console.error("Fetch All Error:", err);
-    res.status(500).json({ message: "Failed to fetch tournaments" });
+    res.status(500).json({ message: "Failed to fetch lobby." });
   }
 });
 
-// @route   GET /api/tournaments/:id
-// @desc    Get a single tournament by ID for the Detail page
-router.get("/:id", async (req, res) => {
+// 2. SECURE: Get only tournaments the logged-in user joined
+router.get("/registered", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const matches = await Tournament.find({ 
+      "participants.user": userId 
+    }).sort({ startTime: 1 });
+    res.json(matches);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching your matches." });
+  }
+});
+
+// 3. SECURE REVEAL: Get specific tournament details
+// We use authMiddleware here to ensure we know WHO is asking.
+router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
-    if (!tournament) {
-      return res.status(404).json({ message: "Tournament not found" });
+    if (!tournament) return res.status(404).json({ message: "Tournament not found." });
+
+    const userId = req.user.id;
+    const now = new Date();
+    const startTime = new Date(tournament.startTime);
+    const fifteenMinsBefore = new Date(startTime.getTime() - 15 * 60000);
+
+    // CRITICAL SECURITY CHECK
+    const isRegistered = tournament.participants.some(
+      (p) => p.user.toString() === userId.toString()
+    );
+
+    let revealedData = tournament.toObject();
+
+    // Only fetch secrets if: 1. Time is right AND 2. User is registered
+    if (now >= fifteenMinsBefore && isRegistered) {
+      const secureMatch = await Tournament.findById(req.params.id).select("+roomId +roomPassword");
+      revealedData.roomId = secureMatch.roomId;
+      revealedData.roomPassword = secureMatch.roomPassword;
+    } else {
+      // Masking the data even if they are in the JSON
+      revealedData.roomId = "REVEALING 15M BEFORE START";
+      revealedData.roomPassword = "REVEALING 15M BEFORE START";
     }
-    res.json(tournament);
+
+    res.json(revealedData);
   } catch (err) {
-    console.error("Fetch One Error:", err);
-    res.status(500).json({ message: "Server error fetching match details" });
+    res.status(500).json({ message: "Server error." });
   }
 });
 
-// @route   POST /api/tournaments/:id/join
-// @desc    Register a user for a match
+// 4. JOIN ARENA
 router.post("/:id/join", authMiddleware, async (req, res) => {
   try {
     const { ign, uid } = req.body;
-
-    if (!ign || !uid) {
-      return res.status(400).json({ message: "In-Game Name (IGN) and UID are required" });
-    }
-
     const tournament = await Tournament.findById(req.params.id);
-
-    if (!tournament) {
-      return res.status(404).json({ message: "Tournament not found" });
+    
+    if (!tournament || tournament.status !== "UPCOMING") {
+      return res.status(400).json({ message: "Registration is not open." });
     }
 
-    if (tournament.status !== "UPCOMING") {
-      return res.status(400).json({ message: `Registration is closed. Match is ${tournament.status}` });
-    }
+    const alreadyJoined = tournament.participants.some(p => p.user.toString() === req.user.id);
+    if (alreadyJoined) return res.status(400).json({ message: "Already in this tournament." });
 
-    if (tournament.participants.length >= tournament.maxPlayers) {
-      return res.status(400).json({ message: "The arena is full!" });
-    }
-
-    const alreadyJoined = tournament.participants.some(
-      (p) => p.user.toString() === req.user.id.toString()
-    );
-
-    if (alreadyJoined) {
-      return res.status(400).json({ message: "You have already registered for this match" });
-    }
-
-    tournament.participants.push({
-      user: req.user.id,
-      ign: ign.trim(),
-      uid: uid.trim(),
-      joinedAt: new Date()
-    });
-
+    tournament.participants.push({ user: req.user.id, ign, uid });
     await tournament.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Successfully joined the arena!",
-      participantCount: tournament.participants.length
-    });
-
+    res.status(200).json({ success: true, message: "Registered successfully!" });
   } catch (error) {
-    console.error("Join Error:", error);
-    res.status(500).json({ message: "Server error during registration" });
+    res.status(500).json({ message: "Join failed." });
   }
 });
 

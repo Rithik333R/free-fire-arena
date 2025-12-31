@@ -21,8 +21,9 @@ export default function Login() {
         { email, password }
       );
 
-      login(res.data.token);
-      localStorage.setItem("user", JSON.stringify(res.data.user));
+      // FIX: Pass both user object (which has the role) and the token
+      // Your backend returns { token, user: { id, username, role } }
+      login(res.data.user, res.data.token);
 
       if (stayLoggedIn) {
         localStorage.setItem("rememberMe", "true");
@@ -35,17 +36,16 @@ export default function Login() {
   };
 
   return (
-    // "items-center" and "justify-center" ensure the card stays dead-center
     <div className="min-h-screen w-full flex flex-col items-center justify-center bg-black px-6 py-12">
       
-      {/* Brand Header - Responsive Text Size */}
+      {/* Brand Header */}
       <div className="mb-10">
         <h1 className="text-3xl md:text-4xl font-black text-white tracking-tighter uppercase text-center">
           🔥 FF <span className="text-[#1DB954]">Arena</span>
         </h1>
       </div>
 
-      {/* Login Card - Mobile width: 100% | Desktop width: max 450px */}
+      {/* Login Card */}
       <div className="w-full max-w-[450px] bg-[#121212] p-8 md:p-12 rounded-2xl border border-white/5 shadow-2xl">
         <h2 className="text-2xl md:text-3xl font-black text-white mb-8 text-center tracking-tight">
           Log in to continue
