@@ -6,10 +6,9 @@ export default function AdminPanel() {
   const [tournaments, setTournaments] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [form, setForm] = useState({ roomId: "", roomPassword: "", status: "UPCOMING" });
+  const [participantResults, setParticipantResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
-  
-  // Modal State
   const [viewingMatch, setViewingMatch] = useState(null);
 
   useEffect(() => {
@@ -38,7 +37,21 @@ export default function AdminPanel() {
         roomPassword: selectedMatch.roomPassword || "",
         status: selectedMatch.status || "UPCOMING"
       });
+      
+      // ✅ FIX: Ensure we map existing participants to state so they show up
+      const initialResults = (selectedMatch.participants || []).map(p => ({
+        ...p,
+        kills: p.kills || 0,
+        rank: p.rank || 0
+      }));
+      setParticipantResults(initialResults);
     }
+  };
+
+  const handleStatChange = (index, field, value) => {
+    const updated = [...participantResults];
+    updated[index][field] = Number(value); // Ensure it's a number
+    setParticipantResults(updated);
   };
 
   const handleUpdate = async (e) => {
@@ -47,10 +60,11 @@ export default function AdminPanel() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      await axios.patch(`http://localhost:5000/api/admin/tournaments/${selectedId}/room`, form, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setMessage({ text: "ARENA UPDATED SUCCESSFULLY", type: "success" });
+      await axios.patch(`http://localhost:5000/api/admin/tournaments/${selectedId}/room`, 
+        { ...form, participants: participantResults }, 
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setMessage({ text: "ARENA & STATS UPDATED", type: "success" });
       fetchTournaments();
     } catch (err) {
       setMessage({ text: "UPDATE FAILED", type: "error" });
@@ -68,14 +82,13 @@ export default function AdminPanel() {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-          {/* FORM SIDE */}
           <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="bg-[#121212] p-8 rounded-[2.5rem] border border-white/5 h-fit">
-            <h2 className="text-xl font-black italic uppercase mb-6">Edit Match Data</h2>
+            <h2 className="text-xl font-black italic uppercase mb-6 text-[#1DB954]">Tournament Logic</h2>
             <form onSubmit={handleUpdate} className="space-y-6">
               <div>
                 <label className="text-[10px] font-black uppercase text-white/30 ml-2">Match</label>
                 <select 
-                  className="w-full bg-black border border-white/10 p-4 rounded-xl mt-2 outline-none focus:border-[#1DB954] font-bold text-sm"
+                  className="w-full bg-black border border-white/10 p-4 rounded-xl mt-2 outline-none focus:border-[#1DB954] font-bold text-sm text-white"
                   onChange={handleSelectChange}
                   value={selectedId}
                   required
@@ -103,7 +116,7 @@ export default function AdminPanel() {
               </div>
 
               <select 
-                className="w-full bg-black border border-white/10 p-4 rounded-xl outline-none focus:border-[#1DB954] font-bold"
+                className="w-full bg-black border border-white/10 p-4 rounded-xl outline-none focus:border-[#1DB954] font-bold text-white"
                 value={form.status}
                 onChange={(e) => setForm({...form, status: e.target.value})}
               >
@@ -112,34 +125,68 @@ export default function AdminPanel() {
                 <option value="COMPLETED">COMPLETED</option>
               </select>
 
+              {/* DYNAMIC RESULT ENTRY SECTION */}
+              {selectedId && (form.status === "LIVE" || form.status === "COMPLETED") && (
+                <div className="pt-6 border-t border-white/5 space-y-4">
+                  <h3 className="text-xs font-black uppercase text-white/40 tracking-widest">Player Performance</h3>
+                  {participantResults.length > 0 ? (
+                    participantResults.map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-black/50 p-3 rounded-lg border border-white/5">
+                        <span className="text-xs font-bold truncate w-24">{p.ign}</span>
+                        <div className="flex gap-2">
+                          <input 
+                            type="number" 
+                            placeholder="Kills"
+                            value={p.kills}
+                            className="w-16 bg-black border border-white/10 p-2 rounded text-xs text-center"
+                            onChange={(e) => handleStatChange(idx, 'kills', e.target.value)}
+                          />
+                          <input 
+                            type="number" 
+                            placeholder="Rank"
+                            value={p.rank}
+                            className="w-16 bg-black border border-white/10 p-2 rounded text-xs text-center"
+                            onChange={(e) => handleStatChange(idx, 'rank', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[10px] text-white/20 italic">No players registered for this match.</p>
+                  )}
+                </div>
+              )}
+
               <button 
                 type="submit" 
                 disabled={loading || !selectedId}
-                className="w-full bg-[#1DB954] text-black font-black py-4 rounded-xl uppercase hover:scale-[1.02] transition-all disabled:opacity-30"
+                className="w-full bg-[#1DB954] text-black font-black py-4 rounded-xl uppercase hover:scale-[1.02] transition-all disabled:opacity-30 shadow-lg shadow-[#1DB954]/20"
               >
                 {loading ? "Saving..." : "Push Updates"}
               </button>
+              {message.text && (
+                <p className={`mt-4 text-center text-[10px] font-black ${message.type === 'error' ? 'text-red-500' : 'text-[#1DB954]'}`}>
+                  {message.text}
+                </p>
+              )}
             </form>
           </motion.div>
 
-          {/* LIST SIDE (Live Feed) */}
           <div className="space-y-6">
             <h2 className="text-xl font-black italic uppercase flex items-center gap-2">Live Status Feed</h2>
             <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
               {tournaments.map(t => (
-                <div key={t._id} className="bg-white/5 p-5 rounded-2xl border border-white/5 hover:border-[#1DB954]/30 transition-all">
-                  <div className="flex justify-between items-start">
+                <div key={t._id} className="bg-white/5 p-5 rounded-2xl border border-white/5 hover:border-[#1DB954]/30 transition-all flex justify-between items-center">
                     <div>
                         <p className="text-sm font-bold">{t.title}</p>
                         <p className={`text-[9px] font-black uppercase mt-1 ${t.status === 'LIVE' ? 'text-red-500' : 'text-[#1DB954]'}`}>{t.status}</p>
                     </div>
                     <button 
                       onClick={() => setViewingMatch(t)}
-                      className="text-[10px] font-black bg-white/10 hover:bg-[#1DB954] hover:text-black px-3 py-1.5 rounded-lg transition-all uppercase tracking-widest"
+                      className="text-[10px] font-black bg-white/10 hover:bg-[#1DB954] hover:text-black px-4 py-2 rounded-lg transition-all uppercase tracking-widest"
                     >
                       View Players
                     </button>
-                  </div>
                 </div>
               ))}
             </div>
@@ -147,44 +194,37 @@ export default function AdminPanel() {
         </div>
       </div>
 
-      {/* PARTICIPANTS MODAL */}
       <AnimatePresence>
         {viewingMatch && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setViewingMatch(null)}
-              className="absolute inset-0 bg-black/90 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-[#121212] border border-white/10 w-full max-w-xl rounded-[2rem] p-8 shadow-2xl"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewingMatch(null)} className="absolute inset-0 bg-black/90 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-[#121212] border border-white/10 w-full max-w-xl rounded-[2rem] p-8 shadow-2xl">
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h2 className="text-2xl font-black italic uppercase">{viewingMatch.title}</h2>
-                  <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-widest">Registered Participants ({viewingMatch.participants.length})</p>
+                  <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-widest">Performance Review</p>
                 </div>
                 <button onClick={() => setViewingMatch(null)} className="text-white/40 hover:text-white text-2xl">&times;</button>
               </div>
-
               <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                {viewingMatch.participants.length > 0 ? (
-                  viewingMatch.participants.map((p, idx) => (
+                {viewingMatch.participants.map((p, idx) => (
                     <div key={idx} className="bg-white/5 p-4 rounded-xl flex justify-between items-center border border-white/5">
                       <div>
-                        <p className="text-xs font-black text-white/40 uppercase tracking-tighter">Player {idx + 1}</p>
                         <p className="text-lg font-bold text-white">{p.ign}</p>
+                        <p className="text-[10px] font-mono text-white/40">{p.uid}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-black text-[#1DB954] uppercase">In-Game UID</p>
-                        <p className="text-sm font-mono text-white/60">{p.uid}</p>
+                      <div className="text-right flex gap-4">
+                        <div>
+                            <p className="text-[9px] font-black text-[#1DB954] uppercase">Kills</p>
+                            <p className="text-xl font-black text-white">{p.kills || 0}</p>
+                        </div>
+                        <div>
+                            <p className="text-[9px] font-black text-white/40 uppercase">Rank</p>
+                            <p className="text-xl font-black text-white">#{p.rank || "--"}</p>
+                        </div>
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-center py-10 text-white/20 font-bold uppercase italic">No players registered yet.</p>
-                )}
+                ))}
               </div>
             </motion.div>
           </div>

@@ -29,9 +29,9 @@ router.get("/registered", authMiddleware, async (req, res) => {
 });
 
 // 3. SECURE REVEAL: Get specific tournament details
-// We use authMiddleware here to ensure we know WHO is asking.
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
+    // Fetch base data first
     const tournament = await Tournament.findById(req.params.id);
     if (!tournament) return res.status(404).json({ message: "Tournament not found." });
 
@@ -49,11 +49,12 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
     // Only fetch secrets if: 1. Time is right AND 2. User is registered
     if (now >= fifteenMinsBefore && isRegistered) {
+      // ✅ Explicitly pull hidden fields only when authorized
       const secureMatch = await Tournament.findById(req.params.id).select("+roomId +roomPassword");
       revealedData.roomId = secureMatch.roomId;
       revealedData.roomPassword = secureMatch.roomPassword;
     } else {
-      // Masking the data even if they are in the JSON
+      // Masking the data for unauthorized/early requests
       revealedData.roomId = "REVEALING 15M BEFORE START";
       revealedData.roomPassword = "REVEALING 15M BEFORE START";
     }

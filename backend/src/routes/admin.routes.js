@@ -17,17 +17,27 @@ router.get("/tournaments", authMiddleware, adminMiddleware, async (req, res) => 
 });
 
 // @route   PATCH /api/admin/tournaments/:id/room
-// @desc    Update Room Credentials and Status
+// @desc    Update Room Credentials, Status, and Participant Results
 router.patch("/tournaments/:id/room", authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { roomId, roomPassword, status } = req.body;
+    const { roomId, roomPassword, status, participants } = req.body;
     
-    const tournament = await Tournament.findById(req.params.id);
+    // Using .select("+roomId +roomPassword") to allow modification of hidden fields
+    const tournament = await Tournament.findById(req.params.id).select("+roomId +roomPassword");
     if (!tournament) return res.status(404).json({ message: "Match not found" });
 
     if (roomId !== undefined) tournament.roomId = roomId;
     if (roomPassword !== undefined) tournament.roomPassword = roomPassword;
     if (status !== undefined) tournament.status = status;
+
+    // ✅ FIX: Saving participant results (kills/ranks)
+    if (Array.isArray(participants)) {
+      tournament.participants = participants.map(p => ({
+        ...p,
+        kills: Number(p.kills) || 0,
+        rank: Number(p.rank) || 0
+      }));
+    }
 
     await tournament.save();
     

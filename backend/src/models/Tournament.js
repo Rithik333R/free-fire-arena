@@ -24,17 +24,18 @@ const tournamentSchema = new mongoose.Schema({
     default: "UPCOMING",
   },
 
-  // UPDATED: Participants now store IGN and UID for match verification
   participants: [
     {
       user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
       ign: { type: String, required: true },
       uid: { type: String, required: true },
+      // Added for Results
+      kills: { type: Number, default: 0 },
+      rank: { type: Number, default: 0 },
       joinedAt: { type: Date, default: Date.now }
     }
   ],
   
-  // SECURE FIELDS (Hidden by default)
   roomId: { type: String, select: false }, 
   roomPassword: { type: String, select: false }
 
