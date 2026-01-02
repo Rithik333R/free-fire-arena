@@ -14,7 +14,6 @@ export default function TournamentDetail() {
   const [formData, setFormData] = useState({ ign: "", uid: "" });
   const [joining, setJoining] = useState(false);
 
-  // Fetch match details - Updated to send Token for Reveal Logic
   const fetchMatch = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -46,14 +45,13 @@ export default function TournamentDetail() {
       if (distance < 0) {
         setTimeLeft("MATCH STARTED");
         clearInterval(timer);
-        fetchMatch(); // Final refresh when match starts
+        fetchMatch(); 
       } else {
         const h = Math.floor((distance % 86400000) / 3600000);
         const m = Math.floor((distance % 3600000) / 60000);
         const s = Math.floor((distance % 60000) / 1000);
         setTimeLeft(`${h}h ${m}m ${s}s`);
 
-        // AUTO-REFRESH LOGIC: Re-fetch data exactly at the 15-minute mark to reveal ID/Pass
         if (h === 0 && m === 15 && s === 0) {
           fetchMatch();
         }
@@ -107,8 +105,10 @@ export default function TournamentDetail() {
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
             <div className="absolute bottom-10 left-10">
               <div className="flex gap-2 mb-4">
-                <span className="bg-[#1DB954] text-black text-[10px] font-black px-3 py-1 rounded-full uppercase">{match.status}</span>
-                <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full uppercase">{match.matchType}</span>
+                <span className={`text-black text-[10px] font-black px-3 py-1 rounded-full uppercase ${match.status === 'COMPLETED' ? 'bg-white/20 text-white' : 'bg-[#1DB954]'}`}>
+                  {match.status}
+                </span>
+                <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full uppercase">{match.matchCategory}</span>
               </div>
               <h1 className="text-5xl md:text-7xl font-black uppercase italic tracking-tighter leading-none">{match.title}</h1>
             </div>
@@ -145,19 +145,26 @@ export default function TournamentDetail() {
 
         {/* RIGHT COLUMN */}
         <div className="space-y-6">
-          <motion.div className="bg-[#1DB954] p-8 rounded-[3rem] text-black shadow-2xl">
-            <h3 className="font-black text-4xl uppercase italic mb-1 tracking-tighter">JOIN ARENA</h3>
-            <p className="font-black text-[10px] opacity-60 mb-8 uppercase tracking-widest">
-              SLOTS: {match.participants?.length || 0} / {match.maxPlayers}
+          <motion.div className={`${match.status === "COMPLETED" ? "bg-white/5" : "bg-[#1DB954]"} p-8 rounded-[3rem] text-white shadow-2xl transition-colors`}>
+            <h3 className={`font-black text-4xl uppercase italic mb-1 tracking-tighter ${match.status === "COMPLETED" ? "text-white/20" : "text-black"}`}>
+              {match.status === "COMPLETED" ? "MATCH ENDED" : "JOIN ARENA"}
+            </h3>
+            <p className={`font-black text-[10px] opacity-60 mb-8 uppercase tracking-widest ${match.status === "COMPLETED" ? "text-white/10" : "text-black/60"}`}>
+              FINAL SLOTS: {match.participants?.length || 0} / {match.maxPlayers}
             </p>
 
-            {isJoined ? (
+            {/* ✅ FIXED LOGIC HERE */}
+            {match.status === "COMPLETED" ? (
+              <button disabled className="w-full bg-white/5 text-white/20 border border-white/10 font-black py-5 rounded-2xl uppercase text-xs">
+                🏁 BATTLE FINISHED
+              </button>
+            ) : match.status === "LIVE" ? (
+                <button disabled className="w-full bg-black/20 text-black/40 font-black py-5 rounded-2xl uppercase text-xs animate-pulse">
+                ⚔️ MATCH IN PROGRESS
+              </button>
+            ) : isJoined ? (
               <button disabled className="w-full bg-black/10 text-black border-2 border-black/10 font-black py-5 rounded-2xl uppercase text-xs">
                 ✅ REGISTERED
-              </button>
-            ) : match.status !== "UPCOMING" ? (
-              <button disabled className="w-full bg-red-600/20 text-black/50 font-black py-5 rounded-2xl uppercase text-xs">
-                REGISTRATION CLOSED
               </button>
             ) : (
               <button onClick={() => setShowModal(true)} className="w-full bg-black text-white font-black py-5 rounded-2xl hover:scale-95 transition-all uppercase text-xs">
@@ -168,33 +175,46 @@ export default function TournamentDetail() {
 
           {/* DYNAMIC ROOM ACCESS BOX */}
           <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem] text-center shadow-xl">
-            <p className="text-[10px] font-black text-[#FFD700] mb-4 uppercase flex items-center justify-center gap-2">
-              <span className="w-2 h-2 bg-[#FFD700] rounded-full animate-pulse" /> 
-              {match.roomId && match.roomId !== "REVEALING SOON" ? "ROOM IS READY" : "ROOM ACCESS"}
-            </p>
-
-            {/* Check if Room ID is actually revealed from Backend */}
-            {match.roomId && match.roomId !== "REVEALING SOON" ? (
-              <div className="space-y-4 py-2">
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                  <p className="text-[9px] text-white/40 font-black uppercase mb-1">Room ID</p>
-                  <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomId}</p>
+             {match.status === "COMPLETED" ? (
+                <div>
+                   <p className="text-[10px] font-black text-white/20 mb-4 uppercase">Match Statistics</p>
+                   <button 
+                    onClick={() => navigate('/leaderboard')}
+                    className="text-[#1DB954] font-black italic uppercase text-lg hover:underline decoration-2 underline-offset-8"
+                   >
+                     View Final Results 🏆
+                   </button>
                 </div>
-                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                  <p className="text-[9px] text-white/40 font-black uppercase mb-1">Password</p>
-                  <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomPassword}</p>
-                </div>
-              </div>
-            ) : (
-              <>
-                <h2 className="text-4xl font-black italic tracking-tighter mb-2">{timeLeft}</h2>
-                <p className="text-[10px] font-bold text-white/30 uppercase leading-relaxed">
-                  {isJoined 
-                    ? "ID AND PASSWORD WILL BE REVEALED HERE 15 MINS BEFORE START."
-                    : "YOU MUST REGISTER TO ACCESS ROOM DETAILS."}
+             ) : (
+               <>
+                <p className="text-[10px] font-black text-[#FFD700] mb-4 uppercase flex items-center justify-center gap-2">
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${match.roomId && match.roomId !== "REVEALING SOON" ? "bg-[#1DB954]" : "bg-[#FFD700]"}`} /> 
+                  {match.roomId && match.roomId !== "REVEALING SOON" ? "ROOM IS READY" : "ROOM ACCESS"}
                 </p>
-              </>
-            )}
+
+                {match.roomId && match.roomId !== "REVEALING SOON" ? (
+                  <div className="space-y-4 py-2">
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+                      <p className="text-[9px] text-white/40 font-black uppercase mb-1">Room ID</p>
+                      <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomId}</p>
+                    </div>
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+                      <p className="text-[9px] text-white/40 font-black uppercase mb-1">Password</p>
+                      <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomPassword}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h2 className="text-4xl font-black italic tracking-tighter mb-2">{timeLeft}</h2>
+                    <p className="text-[10px] font-bold text-white/30 uppercase leading-relaxed">
+                      {isJoined 
+                        ? "ID AND PASSWORD WILL BE REVEALED HERE 15 MINS BEFORE START."
+                        : "YOU MUST REGISTER TO ACCESS ROOM DETAILS."}
+                    </p>
+                  </>
+                )}
+               </>
+             )}
           </div>
         </div>
       </div>

@@ -5,28 +5,37 @@ import User from "../models/User.js";
 const router = express.Router();
 
 // @route   GET /api/leaderboard
-// @desc    Get top players based on total kills across all tournaments
+// @desc    Get top players based on total points (Mode-Specific Logic)
 router.get("/", async (req, res) => {
   try {
     const leaderboard = await Tournament.aggregate([
-      // 1. Only look at completed matches (optional, but recommended)
       { $match: { status: "COMPLETED" } },
-
-      // 2. Break the participants array into individual documents
       { $unwind: "$participants" },
-
-      // 3. Group by the user ID and sum their stats
       {
         $group: {
           _id: "$participants.user",
+          // ✅ MODE-SPECIFIC SCORING LOGIC
+          totalPoints: {
+            $sum: {
+              $cond: [
+                { $eq: ["$matchCategory", "BATTLE_ROYALE"] },
+                // BR Logic: (Rank 1 ? 20pts : 0pts) + Kills
+                { 
+                  $add: [
+                    { $cond: [{ $eq: ["$participants.rank", 1] }, 20, 0] },
+                    "$participants.kills"
+                  ] 
+                },
+                // CS / Lone Wolf Logic: Just Kills (Placement points disabled)
+                "$participants.kills"
+              ]
+            }
+          },
           totalKills: { $sum: "$participants.kills" },
           totalMatches: { $sum: 1 },
-          // We take the last known IGN used by the player
           ign: { $last: "$participants.ign" }
         }
       },
-
-      // 4. Join with the Users collection to get the profile picture or username
       {
         $lookup: {
           from: "users",
@@ -35,26 +44,20 @@ router.get("/", async (req, res) => {
           as: "userDetails"
         }
       },
-
-      // 5. Flatten the user details array
       { $unwind: "$userDetails" },
-
-      // 6. Project the final shape of the data
       {
         $project: {
           _id: 1,
           ign: 1,
           username: "$userDetails.username",
+          totalPoints: 1,
           totalKills: 1,
           totalMatches: 1,
-          avatar: "$userDetails.avatar" // If you have an avatar field
+          avatar: "$userDetails.avatar"
         }
       },
-
-      // 7. Sort by highest kills
-      { $sort: { totalKills: -1 } },
-
-      // 8. Limit to top 50
+      // Sort by Points now instead of just Kills
+      { $sort: { totalPoints: -1 } },
       { $limit: 50 }
     ]);
 

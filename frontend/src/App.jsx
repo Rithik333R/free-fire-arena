@@ -8,7 +8,9 @@ import Register from "./pages/Register";
 import Tournaments from "./pages/Tournaments";
 import TournamentDetail from "./pages/TournamentDetail";
 import MyMatches from "./pages/MyMatches";
-import AdminPanel from "./pages/AdminPanel"; // Ensure this exists!
+import AdminPanel from "./pages/AdminPanel";
+import Leaderboard from './pages/Leaderboard';
+import Profile from "./pages/Profile";
 
 
 export default function App() {
@@ -40,6 +42,9 @@ export default function App() {
           {/* PUBLIC TOURNAMENT ROUTES */}
           <Route path="/tournaments" element={<Tournaments setOpen={setOpen} />} />
           <Route path="/tournaments/view/:id" element={<TournamentDetail setOpen={setOpen} />} />
+          
+          {/* ✅ LEADERBOARD ROUTE ADDED HERE */}
+          <Route path="/leaderboard" element={<Leaderboard />} />
 
           {/* MY HUB */}
           <Route 
@@ -56,6 +61,11 @@ export default function App() {
                 : <Navigate to="/" />
             } 
           />
+
+          <Route 
+  path="/profile" 
+  element={token ? <Profile /> : <Navigate to="/login" />} 
+/>
 
           {/* AUTH ROUTES */}
           <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />

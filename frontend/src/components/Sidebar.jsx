@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 
 export default function Sidebar({ open, setOpen }) {
   const navigate = useNavigate();
-  const { logout, user } = useAuth(); // Destructure user to check the role
+  const { logout, user } = useAuth();
 
   const handleLogout = () => {
     logout();
@@ -16,6 +16,7 @@ export default function Sidebar({ open, setOpen }) {
   const navItems = [
     { name: "Home", path: "/" },
     { name: "Tournaments", path: "/tournaments" },
+    { name: "Leaderboard", path: "/leaderboard", icon: "🏆" }, // ✅ Added Leaderboard
     { name: "My Hub", path: "/my-matches" },
     { name: "Profile", path: "/profile" },
   ];
@@ -51,7 +52,8 @@ export default function Sidebar({ open, setOpen }) {
               onClick={() => setOpen(false)} 
               className="block"
             >
-              <div className="px-4 py-3 text-[#b3b3b3] font-bold text-sm hover:text-white rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
+              <div className="px-4 py-3 text-[#b3b3b3] font-bold text-sm hover:text-white rounded-lg hover:bg-white/5 cursor-pointer transition-colors flex items-center gap-3">
+                {item.icon && <span>{item.icon}</span>}
                 {item.name}
               </div>
             </Link>
