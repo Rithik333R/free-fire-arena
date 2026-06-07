@@ -1,248 +1,563 @@
-import { useEffect, useState } from "react";
+// frontend/src/pages/TournamentDetail.jsx
+
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import axios from "axios";
-import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "../hooks/useAuth";
+import { getTournamentById, joinTournament } from "../api/tournaments.api";
+
+// Reveal polling constants.
+// Within REVEAL_POLL_WINDOW_MS of start time, re-fetch every
+// REVEAL_POLL_INTERVAL_MS so credentials appear as soon as the
+// backend reveals them — no exact-second dependency.
+const REVEAL_POLL_WINDOW_MS = 20 * 60 * 1000;  // 20 minutes
+const REVEAL_POLL_INTERVAL_MS = 30 * 1000;      // 30 seconds
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const CATEGORY_LABELS = {
+  BATTLE_ROYALE: "Battle Royale",
+  CLASH_SQUAD: "Clash Squad",
+  LONE_WOLF: "Lone Wolf",
+};
+
+const STATUS_CONFIG = {
+  LIVE: {
+    label: "LIVE",
+    classes:
+      "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse",
+  },
+  UPCOMING: {
+    label: "UPCOMING",
+    classes: "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30",
+  },
+  AWAITING_RESULTS: {
+    label: "RESULTS PENDING",
+    classes: "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+  },
+  COMPLETED: {
+    label: "COMPLETED",
+    classes: "bg-white/10 text-white/50 border border-white/10",
+  },
+};
+
+function formatCountdown(ms) {
+  if (ms <= 0) return { h: 0, m: 0, s: 0, label: "Starting soon" };
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return { h, m, s, label: null };
+}
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+function StatusBadge({ status }) {
+  const config = STATUS_CONFIG[status] ?? {
+    label: status,
+    classes: "bg-white/10 text-white/40 border border-white/10",
+  };
+  return (
+    <span
+      className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${config.classes}`}
+    >
+      {config.label}
+    </span>
+  );
+}
+
+function CountdownDisplay({ startTime }) {
+  const [countdown, setCountdown] = useState({
+    h: 0,
+    m: 0,
+    s: 0,
+    label: null,
+  });
+
+  useEffect(() => {
+    const tick = () => {
+      const diff = new Date(startTime).getTime() - Date.now();
+      setCountdown(formatCountdown(diff));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startTime]);
+
+  if (countdown.label) {
+    return (
+      <p className="text-[#1DB954] font-black uppercase tracking-widest text-sm">
+        {countdown.label}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      {[
+        { value: countdown.h, unit: "H" },
+        { value: countdown.m, unit: "M" },
+        { value: countdown.s, unit: "S" },
+      ].map(({ value, unit }, i, arr) => (
+        <div key={unit} className="flex items-end gap-0.5">
+          <span className="text-white font-black text-2xl tabular-nums">
+            {pad(value)}
+          </span>
+          <span className="text-white/30 text-[10px] font-black uppercase mb-1">
+            {unit}
+          </span>
+          {i < arr.length - 1 && (
+            <span className="text-white/20 text-lg font-black mb-0.5 mx-0.5">
+              :
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * RoomCredentials — displays room access information.
+ *
+ * Props:
+ *   credentialsRevealed: boolean — from backend, authoritative reveal state
+ *   roomId: string | null
+ *   roomPassword: string | null
+ *
+ * Three states:
+ *   1. Not revealed — show locked panel with time notice
+ *   2. Revealed but credentials not set — admin has not entered them yet
+ *   3. Revealed and credentials available — show roomId and roomPassword
+ */
+function RoomCredentials({ credentialsRevealed, roomId, roomPassword }) {
+  // State 1 — not yet in the reveal window.
+  if (!credentialsRevealed) {
+    return (
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
+        <div className="text-2xl mb-3">🔒</div>
+        <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">
+          Room credentials will be revealed 15 minutes before match start
+        </p>
+      </div>
+    );
+  }
+
+  // State 2 — in reveal window but admin has not set credentials yet.
+  if (!roomId) {
+    return (
+      <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-6 text-center">
+        <div className="text-2xl mb-3">⏳</div>
+        <p className="text-yellow-400 text-[10px] font-black uppercase tracking-widest">
+          Credentials not set yet — check back shortly
+        </p>
+      </div>
+    );
+  }
+
+  // State 3 — credentials available.
+  return (
+    <div className="bg-[#1DB954]/5 border border-[#1DB954]/20 rounded-2xl p-6 flex flex-col gap-4">
+      <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-widest">
+        🔓 Room Credentials Revealed
+      </p>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-black/40 rounded-xl p-4">
+          <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-2">
+            Room ID
+          </p>
+          <p className="text-white font-black text-xl font-mono tracking-wider">
+            {roomId}
+          </p>
+        </div>
+        <div className="bg-black/40 rounded-xl p-4">
+          <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-2">
+            Password
+          </p>
+          <p className="text-white font-black text-xl font-mono tracking-wider">
+            {roomPassword}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JoinForm({ onJoin, loading }) {
+  const [ign, setIgn] = useState("");
+  const [uid, setUid] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!ign.trim() || !uid.trim()) return;
+    onJoin({ ign: ign.trim(), uid: uid.trim() });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div>
+        <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+          In-Game Name (IGN)
+        </label>
+        <input
+          type="text"
+          required
+          value={ign}
+          onChange={(e) => setIgn(e.target.value)}
+          placeholder="Your Free Fire name"
+          className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+        />
+      </div>
+      <div>
+        <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+          Free Fire UID
+        </label>
+        <input
+          type="text"
+          required
+          value={uid}
+          onChange={(e) => setUid(e.target.value)}
+          placeholder="Numeric UID (6–12 digits)"
+          className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full bg-[#1DB954] text-black font-black uppercase tracking-widest text-xs py-4 rounded-xl hover:bg-white transition-all disabled:opacity-50 mt-2"
+      >
+        {loading ? "Registering..." : "Join Tournament"}
+      </button>
+    </form>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
 
 export default function TournamentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [match, setMatch] = useState(null);
+  const { user } = useAuth();
+
+  const [tournament, setTournament] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [timeLeft, setTimeLeft] = useState("");
-  
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ ign: "", uid: "" });
-  const [joining, setJoining] = useState(false);
+  const [error, setError] = useState(null);
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinError, setJoinError] = useState(null);
+  const [joinSuccess, setJoinSuccess] = useState(false);
 
-  const fetchMatch = async () => {
+  const userId = user?._id ?? user?.id;
+
+  // ── Fetch ──────────────────────────────────────────────────────────
+
+  const fetchTournament = useCallback(async () => {
+    if (!id) return;
     try {
-      const token = localStorage.getItem("token");
-      const res = await axios.get(`http://localhost:5000/api/tournaments/${id}`, {
-        headers: { Authorization: token ? `Bearer ${token}` : "" }
-      });
-      setMatch(res.data);
-      setLoading(false);
+      const data = await getTournamentById(id);
+      setTournament(data);
+      setError(null);
     } catch (err) {
-      console.error("Fetch Error:", err);
-      setLoading(false);
+      console.error("Failed to fetch tournament:", err);
+      setError("Failed to load tournament details. Please try again.");
     }
-  };
-
-  useEffect(() => {
-    fetchMatch();
   }, [id]);
 
+  // Initial fetch.
   useEffect(() => {
-    if (!match || match.status !== "UPCOMING") {
-        if (match?.status === "LIVE") setTimeLeft("MATCH IS LIVE");
-        if (match?.status === "COMPLETED") setTimeLeft("MATCH ENDED");
-        return;
-    }
+    const initialFetch = async () => {
+      setLoading(true);
+      await fetchTournament();
+      setLoading(false);
+    };
+    initialFetch();
+  }, [fetchTournament]);
 
-    const timer = setInterval(() => {
-      const distance = new Date(match.startTime).getTime() - new Date().getTime();
-      
-      if (distance < 0) {
-        setTimeLeft("MATCH STARTED");
-        clearInterval(timer);
-        fetchMatch(); 
-      } else {
-        const h = Math.floor((distance % 86400000) / 3600000);
-        const m = Math.floor((distance % 3600000) / 60000);
-        const s = Math.floor((distance % 60000) / 1000);
-        setTimeLeft(`${h}h ${m}m ${s}s`);
+  // Proximity-based credential reveal polling.
+  // Polls every 30s when registered and within 20 minutes of start.
+  // Reads credentialsRevealed from each response — no string comparison.
+  useEffect(() => {
+    if (!tournament) return;
 
-        if (h === 0 && m === 15 && s === 0) {
-          fetchMatch();
-        }
-      }
-    }, 1000);
+    const isRegistered = tournament.participants?.some(
+      (p) =>
+        p.user === userId ||
+        p.user?._id === userId ||
+        p.user?.toString() === userId?.toString()
+    );
 
-    return () => clearInterval(timer);
-  }, [match]);
+    if (!isRegistered) return;
+    if (tournament.status !== "UPCOMING") return;
 
-  const handleJoin = async (e) => {
-    e.preventDefault();
-    setJoining(true);
+    const msUntilStart =
+      new Date(tournament.startTime).getTime() - Date.now();
+    if (msUntilStart > REVEAL_POLL_WINDOW_MS) return;
+
+    const pollId = setInterval(fetchTournament, REVEAL_POLL_INTERVAL_MS);
+    return () => clearInterval(pollId);
+  }, [tournament, userId, fetchTournament]);
+
+  // ── Join ───────────────────────────────────────────────────────────
+
+  const handleJoin = async ({ ign, uid }) => {
+    setJoinLoading(true);
+    setJoinError(null);
     try {
-      const token = localStorage.getItem("token");
-      await axios.post(
-        `http://localhost:5000/api/tournaments/${id}/join`,
-        formData,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      alert("Successfully joined the Arena!");
-      setShowModal(false);
-      fetchMatch(); 
+      await joinTournament(id, { ign, uid });
+      setJoinSuccess(true);
+      await fetchTournament();
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to join");
+      const message =
+        err.response?.data?.message ?? "Failed to join. Please try again.";
+      setJoinError(message);
     } finally {
-      setJoining(false);
+      setJoinLoading(false);
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-[#1DB954] font-black tracking-widest">LOADING ARENA...</div>;
-  if (!match) return <div className="p-20 text-white text-center font-bold uppercase">Match Not Found</div>;
-
-  const token = localStorage.getItem("token");
-  const userId = token ? JSON.parse(atob(token.split('.')[1])).id : null;
-  const isJoined = match.participants?.some(p => p.user === userId || p.user?._id === userId);
-
-  return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-12">
-      <div className="max-w-6xl mx-auto mb-8">
-        <button onClick={() => navigate(-1)} className="text-xs font-black text-white/40 hover:text-[#1DB954] transition-colors flex items-center gap-2">
-          ← ARENA LOBBY
-        </button>
+  // ── Render: loading ────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
+          <p className="text-white/30 text-xs font-black uppercase tracking-widest">
+            Loading match details...
+          </p>
+        </div>
       </div>
+    );
+  }
 
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-10">
-        
-        {/* LEFT COLUMN */}
-        <div className="lg:col-span-2 space-y-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="relative h-[300px] md:h-[400px] rounded-[3.5rem] overflow-hidden shadow-2xl border border-white/5">
-            <img src={match.banner} alt="banner" className="w-full h-full object-cover opacity-60" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-            <div className="absolute bottom-10 left-10">
-              <div className="flex gap-2 mb-4">
-                <span className={`text-black text-[10px] font-black px-3 py-1 rounded-full uppercase ${match.status === 'COMPLETED' ? 'bg-white/20 text-white' : 'bg-[#1DB954]'}`}>
-                  {match.status}
-                </span>
-                <span className="bg-white/10 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full uppercase">{match.matchCategory}</span>
-              </div>
-              <h1 className="text-5xl md:text-7xl font-black uppercase italic tracking-tighter leading-none">{match.title}</h1>
-            </div>
-          </motion.div>
+  // ── Render: error ──────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+        <div className="text-center">
+          <p className="text-red-400 text-sm font-black uppercase tracking-widest mb-6">
+            {error}
+          </p>
+          <button
+            onClick={() => navigate(-1)}
+            className="bg-white text-black font-black uppercase tracking-widest text-xs px-8 py-3 rounded-xl hover:bg-[#1DB954] transition-all"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: "PRIZE POOL", val: `₹${match.prizePool}`, color: "text-[#1DB954]" },
-              { label: "ENTRY FEE", val: match.entryFee === 0 ? "FREE" : `₹${match.entryFee}` },
-              { label: "MAP", val: match.map },
-              { label: "VERSION", val: "MOBILE" }
-            ].map((stat, i) => (
-              <div key={i} className="bg-[#121212] border border-white/5 p-6 rounded-3xl">
-                <p className="text-[10px] font-black text-white/40 mb-1 uppercase tracking-widest">{stat.label}</p>
-                <p className={`text-xl font-black uppercase italic ${stat.color || "text-white"}`}>{stat.val}</p>
-              </div>
-            ))}
+  if (!tournament) return null;
+
+  // Derived state.
+  const isRegistered = tournament.participants?.some(
+    (p) =>
+      p.user === userId ||
+      p.user?._id === userId ||
+      p.user?.toString() === userId?.toString()
+  );
+  const isFull =
+    (tournament.participants?.length ?? 0) >= tournament.maxPlayers;
+  const canJoin =
+    tournament.status === "UPCOMING" && !isRegistered && !isFull;
+  const categoryLabel =
+    CATEGORY_LABELS[tournament.matchCategory] ?? tournament.matchCategory;
+
+  // ── Render: main ───────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-black text-white p-6 md:p-10">
+      <div className="max-w-3xl mx-auto">
+
+        {/* Back button */}
+        <button
+          onClick={() => navigate(-1)}
+          className="group mb-8 flex items-center gap-2 text-white/40 hover:text-[#1DB954] transition-all font-black uppercase text-[10px] tracking-widest"
+        >
+          <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:border-[#1DB954]/50 transition-all">
+            ←
           </div>
+          Back to Lobby
+        </button>
 
-          <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem]">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-1 h-6 bg-[#1DB954] rounded-full" />
-              <h2 className="text-xl font-black uppercase italic tracking-tight">OFFICIAL MATCH RULES</h2>
+        {/* Banner */}
+        {tournament.banner && (
+          <div className="h-48 rounded-2xl overflow-hidden mb-6">
+            <img
+              src={tournament.banner}
+              alt={tournament.title}
+              className="w-full h-full object-cover opacity-60"
+            />
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div className="flex-1 min-w-0">
+            <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-[0.4em] mb-1">
+              {categoryLabel}
+            </p>
+            <h1 className="text-3xl font-black italic uppercase tracking-tighter text-white">
+              {tournament.title}
+            </h1>
+          </div>
+          <StatusBadge status={tournament.status} />
+        </div>
+
+        {/* Meta grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {[
+            {
+              label: "Prize Pool",
+              value: `₹${tournament.prizePool?.toLocaleString("en-IN") ?? 0}`,
+              accent: true,
+            },
+            {
+              label: "Entry Fee",
+              value:
+                tournament.entryFee > 0
+                  ? `₹${tournament.entryFee.toLocaleString("en-IN")}`
+                  : "FREE",
+            },
+            {
+              label: "Players",
+              value: `${tournament.participants?.length ?? 0} / ${
+                tournament.maxPlayers
+              }`,
+            },
+            {
+              label: "Map",
+              value: tournament.map ?? "—",
+            },
+          ].map(({ label, value, accent }) => (
+            <div
+              key={label}
+              className="bg-[#121212] border border-white/5 rounded-xl p-4 text-center"
+            >
+              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                {label}
+              </p>
+              <p
+                className={`text-sm font-black ${
+                  accent ? "text-[#1DB954]" : "text-white"
+                }`}
+              >
+                {value}
+              </p>
             </div>
-            <ul className="space-y-4">
-              {match.rules?.map((rule, idx) => (
-                <li key={idx} className="flex gap-4 text-sm font-bold text-white/70">
-                  <span className="text-[#1DB954]">0{idx + 1}</span> {rule}
+          ))}
+        </div>
+
+        {/* Countdown — only for UPCOMING matches */}
+        {tournament.status === "UPCOMING" && tournament.startTime && (
+          <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6 text-center">
+            <p className="text-white/30 text-[10px] font-black uppercase tracking-widest mb-3">
+              Match Starts In
+            </p>
+            <CountdownDisplay startTime={tournament.startTime} />
+          </div>
+        )}
+
+        {/* Room credentials — only for registered users */}
+        {isRegistered && (
+          <div className="mb-6">
+            <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">
+              Room Access
+            </p>
+            {/* B3 fix: reads credentialsRevealed boolean — no string comparison */}
+            <RoomCredentials
+              credentialsRevealed={tournament.credentialsRevealed ?? false}
+              roomId={tournament.roomId ?? null}
+              roomPassword={tournament.roomPassword ?? null}
+            />
+          </div>
+        )}
+
+        {/* Join section */}
+        {tournament.status === "UPCOMING" && (
+          <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6">
+            {isRegistered || joinSuccess ? (
+              <div className="text-center py-4">
+                <span className="text-3xl mb-3 block">✅</span>
+                <p className="text-[#1DB954] font-black uppercase tracking-widest text-sm">
+                  You are registered
+                </p>
+                <p className="text-white/30 text-xs mt-2">
+                  Room credentials appear here 15 minutes before start.
+                </p>
+              </div>
+            ) : isFull ? (
+              <div className="text-center py-4">
+                <span className="text-3xl mb-3 block">🚫</span>
+                <p className="text-white/40 font-black uppercase tracking-widest text-sm">
+                  Tournament Full
+                </p>
+              </div>
+            ) : (
+              <>
+                <h2 className="text-white font-black uppercase tracking-tight text-base mb-5">
+                  Register for this Match
+                </h2>
+                {joinError && (
+                  <p className="text-red-400 text-[11px] font-black uppercase tracking-widest mb-4">
+                    {joinError}
+                  </p>
+                )}
+                <JoinForm onJoin={handleJoin} loading={joinLoading} />
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Description */}
+        {tournament.description && (
+          <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6">
+            <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">
+              About
+            </h2>
+            <p className="text-white/60 text-sm leading-relaxed">
+              {tournament.description}
+            </p>
+          </div>
+        )}
+
+        {/* Rules */}
+        {Array.isArray(tournament.rules) && tournament.rules.length > 0 && (
+          <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6">
+            <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">
+              Rules
+            </h2>
+            <ul className="flex flex-col gap-2">
+              {tournament.rules.map((rule, i) => (
+                <li
+                  key={i}
+                  className="flex items-start gap-3 text-sm text-white/60"
+                >
+                  <span className="text-[#1DB954] font-black shrink-0 mt-0.5">
+                    {String(i + 1).padStart(2, "0")}.
+                  </span>
+                  {rule}
                 </li>
               ))}
             </ul>
           </div>
-        </div>
-
-        {/* RIGHT COLUMN */}
-        <div className="space-y-6">
-          <motion.div className={`${match.status === "COMPLETED" ? "bg-white/5" : "bg-[#1DB954]"} p-8 rounded-[3rem] text-white shadow-2xl transition-colors`}>
-            <h3 className={`font-black text-4xl uppercase italic mb-1 tracking-tighter ${match.status === "COMPLETED" ? "text-white/20" : "text-black"}`}>
-              {match.status === "COMPLETED" ? "MATCH ENDED" : "JOIN ARENA"}
-            </h3>
-            <p className={`font-black text-[10px] opacity-60 mb-8 uppercase tracking-widest ${match.status === "COMPLETED" ? "text-white/10" : "text-black/60"}`}>
-              FINAL SLOTS: {match.participants?.length || 0} / {match.maxPlayers}
-            </p>
-
-            {/* ✅ FIXED LOGIC HERE */}
-            {match.status === "COMPLETED" ? (
-              <button disabled className="w-full bg-white/5 text-white/20 border border-white/10 font-black py-5 rounded-2xl uppercase text-xs">
-                🏁 BATTLE FINISHED
-              </button>
-            ) : match.status === "LIVE" ? (
-                <button disabled className="w-full bg-black/20 text-black/40 font-black py-5 rounded-2xl uppercase text-xs animate-pulse">
-                ⚔️ MATCH IN PROGRESS
-              </button>
-            ) : isJoined ? (
-              <button disabled className="w-full bg-black/10 text-black border-2 border-black/10 font-black py-5 rounded-2xl uppercase text-xs">
-                ✅ REGISTERED
-              </button>
-            ) : (
-              <button onClick={() => setShowModal(true)} className="w-full bg-black text-white font-black py-5 rounded-2xl hover:scale-95 transition-all uppercase text-xs">
-                REGISTER NOW →
-              </button>
-            )}
-          </motion.div>
-
-          {/* DYNAMIC ROOM ACCESS BOX */}
-          <div className="bg-[#121212] border border-white/5 p-8 rounded-[3rem] text-center shadow-xl">
-             {match.status === "COMPLETED" ? (
-                <div>
-                   <p className="text-[10px] font-black text-white/20 mb-4 uppercase">Match Statistics</p>
-                   <button 
-                    onClick={() => navigate('/leaderboard')}
-                    className="text-[#1DB954] font-black italic uppercase text-lg hover:underline decoration-2 underline-offset-8"
-                   >
-                     View Final Results 🏆
-                   </button>
-                </div>
-             ) : (
-               <>
-                <p className="text-[10px] font-black text-[#FFD700] mb-4 uppercase flex items-center justify-center gap-2">
-                  <span className={`w-2 h-2 rounded-full animate-pulse ${match.roomId && match.roomId !== "REVEALING SOON" ? "bg-[#1DB954]" : "bg-[#FFD700]"}`} /> 
-                  {match.roomId && match.roomId !== "REVEALING SOON" ? "ROOM IS READY" : "ROOM ACCESS"}
-                </p>
-
-                {match.roomId && match.roomId !== "REVEALING SOON" ? (
-                  <div className="space-y-4 py-2">
-                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                      <p className="text-[9px] text-white/40 font-black uppercase mb-1">Room ID</p>
-                      <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomId}</p>
-                    </div>
-                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                      <p className="text-[9px] text-white/40 font-black uppercase mb-1">Password</p>
-                      <p className="text-2xl font-black tracking-widest text-[#1DB954]">{match.roomPassword}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <h2 className="text-4xl font-black italic tracking-tighter mb-2">{timeLeft}</h2>
-                    <p className="text-[10px] font-bold text-white/30 uppercase leading-relaxed">
-                      {isJoined 
-                        ? "ID AND PASSWORD WILL BE REVEALED HERE 15 MINS BEFORE START."
-                        : "YOU MUST REGISTER TO ACCESS ROOM DETAILS."}
-                    </p>
-                  </>
-                )}
-               </>
-             )}
-          </div>
-        </div>
-      </div>
-
-      {/* MODAL */}
-      <AnimatePresence>
-        {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#121212] border border-white/10 p-10 rounded-[3rem] max-w-md w-full shadow-2xl">
-              <h2 className="text-3xl font-black uppercase italic mb-2 tracking-tight">ARENA ENTRY</h2>
-              <form onSubmit={handleJoin} className="space-y-5">
-                <div>
-                  <label className="text-[9px] font-black uppercase text-[#1DB954] ml-2 tracking-widest">In-Game Name (IGN)</label>
-                  <input required className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954]" placeholder="e.g. SKYLORD_07" onChange={(e) => setFormData({...formData, ign: e.target.value})} />
-                </div>
-                <div>
-                  <label className="text-[9px] font-black uppercase text-[#1DB954] ml-2 tracking-widest">Player UID</label>
-                  <input required className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-white focus:outline-none focus:border-[#1DB954]" placeholder="e.g. 283940122" onChange={(e) => setFormData({...formData, uid: e.target.value})} />
-                </div>
-                <div className="flex gap-3 pt-6">
-                  <button type="button" onClick={() => setShowModal(false)} className="flex-1 bg-white/5 text-white/40 font-black py-4 rounded-2xl uppercase text-[10px]">CANCEL</button>
-                  <button type="submit" disabled={joining} className="flex-1 bg-[#1DB954] text-black font-black py-4 rounded-2xl uppercase text-[10px]">{joining ? "JOINING..." : "CONFIRM ENTRY"}</button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
         )}
-      </AnimatePresence>
+
+        {/* Results button for completed matches */}
+        {(tournament.status === "COMPLETED" ||
+          tournament.status === "AWAITING_RESULTS") && (
+          <button
+            onClick={() => navigate(`/tournaments/${id}/results`)}
+            className="w-full bg-[#1DB954] text-black font-black uppercase tracking-widest text-xs py-4 rounded-xl hover:bg-white transition-all"
+          >
+            {tournament.status === "AWAITING_RESULTS"
+              ? "Results Pending..."
+              : "View Final Results"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

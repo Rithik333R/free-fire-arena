@@ -1,131 +1,160 @@
+// frontend/src/pages/Register.jsx
+
 import { useState } from "react";
-import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { useAuth } from "../hooks/useAuth";
+import { register as registerApi } from "../api/auth.api";
 
 export default function Register() {
-  const [form, setForm] = useState({
+  const navigate = useNavigate();
+  const { login } = useAuth();
+
+  const [formData, setFormData] = useState({
     username: "",
     email: "",
-    password: ""
+    password: "",
+    confirmPassword: "",
   });
-  const [error, setError] = useState("");
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError("");
+    setError(null);
+
+    // Client-side password confirmation check.
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Connects to your backend auth.routes.js -> register controller
-      await axios.post("http://localhost:5000/api/auth/register", form);
-      
-      // On success, send user to login page
-      navigate("/login");
+      // Send only the fields the backend expects — exclude confirmPassword.
+      const { confirmPassword, ...payload } = formData;
+      const data = await registerApi(payload);
+
+      // Backend returns { token, user } on successful registration.
+      // Log the user in immediately — no need to redirect to login.
+      login(data.token, data.user);
+      navigate("/");
     } catch (err) {
-      setError(err.response?.data?.message || "Registration failed. Try again.");
+      const message =
+        err.response?.data?.message ?? "Registration failed. Please try again.";
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    // Flex centering ensures the card doesn't go to the side
-    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-black px-6 py-10">
-      
-      {/* Branding Header */}
-      <motion.div 
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-8 text-center"
-      >
-        <h1 className="text-3xl md:text-4xl font-black text-white tracking-tighter uppercase">
-          🔥 FF <span className="text-[#1DB954]">Arena</span>
-        </h1>
-      </motion.div>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        {/* Brand */}
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-black italic uppercase tracking-tighter text-white">
+            Free<span className="text-[#1DB954]">Arena</span>
+          </h1>
+          <p className="text-white/30 text-[11px] uppercase tracking-widest mt-2">
+            Create Account
+          </p>
+        </div>
 
-      {/* Registration Card */}
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-[450px] bg-[#121212] p-8 md:p-12 rounded-2xl border border-white/5 shadow-2xl"
-      >
-        <h2 className="text-2xl md:text-3xl font-black text-white mb-2 text-center tracking-tight">
-          Sign up for free
-        </h2>
-        <p className="text-[#b3b3b3] text-center text-sm mb-8 font-medium">
-          Start your journey in the arena.
-        </p>
+        <div className="bg-[#121212] border border-white/5 rounded-2xl p-8">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                Username
+              </label>
+              <input
+                type="text"
+                name="username"
+                required
+                value={formData.username}
+                onChange={handleChange}
+                placeholder="YourGamertag"
+                className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+              />
+            </div>
 
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/50 text-red-500 p-3 rounded-lg mb-6 text-xs font-bold text-center">
-            {error}
-          </div>
-        )}
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                name="email"
+                required
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="you@example.com"
+                className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+              />
+            </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Username Field */}
-          <div className="space-y-2">
-            <label className="block text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#b3b3b3] ml-1">
-              Username
-            </label>
-            <input
-              type="text"
-              placeholder="Create a username"
-              className="w-full bg-[#242424] text-white border border-transparent focus:border-[#1DB954]/50 p-4 rounded-xl outline-none transition-all placeholder:text-[#535353] text-sm"
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              required
-            />
-          </div>
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                Password
+              </label>
+              <input
+                type="password"
+                name="password"
+                required
+                minLength={6}
+                value={formData.password}
+                onChange={handleChange}
+                placeholder="Min. 6 characters"
+                className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+              />
+            </div>
 
-          {/* Email Field */}
-          <div className="space-y-2">
-            <label className="block text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#b3b3b3] ml-1">
-              Email Address
-            </label>
-            <input
-              type="email"
-              placeholder="Enter your email"
-              className="w-full bg-[#242424] text-white border border-transparent focus:border-[#1DB954]/50 p-4 rounded-xl outline-none transition-all placeholder:text-[#535353] text-sm"
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              required
-            />
-          </div>
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                Confirm Password
+              </label>
+              <input
+                type="password"
+                name="confirmPassword"
+                required
+                minLength={6}
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                placeholder="Re-enter password"
+                className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+              />
+            </div>
 
-          {/* Password Field */}
-          <div className="space-y-2">
-            <label className="block text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#b3b3b3] ml-1">
-              Password
-            </label>
-            <input
-              type="password"
-              placeholder="Create a password"
-              className="w-full bg-[#242424] text-white border border-transparent focus:border-[#1DB954]/50 p-4 rounded-xl outline-none transition-all placeholder:text-[#535353] text-sm"
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
-            />
-          </div>
+            {error && (
+              <p className="text-red-400 text-[11px] font-black uppercase tracking-widest text-center">
+                {error}
+              </p>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-[#1DB954] text-black font-black py-4 rounded-full mt-4 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-[#1DB954]/20 uppercase tracking-widest text-sm disabled:opacity-50"
-          >
-            {loading ? "Creating Account..." : "Sign Up"}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#1DB954] text-black font-black uppercase tracking-widest text-xs py-4 rounded-xl hover:bg-white transition-all disabled:opacity-50 mt-2"
+            >
+              {loading ? "Creating Account..." : "Create Account"}
+            </button>
+          </form>
 
-        <div className="mt-10 pt-8 border-t border-white/5 text-center">
-          <p className="text-[#b3b3b3] text-xs md:text-sm font-bold">
+          <p className="text-center text-white/30 text-xs mt-6">
             Already have an account?{" "}
-            <Link to="/login" className="text-white hover:text-[#1DB954] transition underline decoration-[#1DB954] underline-offset-4 font-black">
-              Log in here
+            <Link
+              to="/login"
+              className="text-[#1DB954] hover:text-white transition-colors font-black"
+            >
+              Sign in
             </Link>
           </p>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

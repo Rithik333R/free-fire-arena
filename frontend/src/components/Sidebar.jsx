@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom"; 
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../hooks/useAuth";
 
 export default function Sidebar({ open, setOpen }) {
   const navigate = useNavigate();

@@ -1,141 +1,250 @@
+// frontend/src/pages/Leaderboard.jsx
+
 import { useState, useEffect } from "react";
-import axios from "axios";
-import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { getLeaderboard } from "../api/leaderboard.api";
 
-export default function Leaderboard() {
-  const [players, setPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate(); // For the back button functionality
+// ── Helpers ────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const fetchLeaderboard = async () => {
-      try {
-        const res = await axios.get("http://localhost:5000/api/leaderboard");
-        setPlayers(Array.isArray(res.data) ? res.data : []);
-      } catch (err) {
-        console.error("Error fetching leaderboard", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchLeaderboard();
-  }, []);
+/**
+ * Returns up to two uppercase initials from a username or IGN string.
+ * Used as avatar fallback since the User model has no avatar field yet.
+ */
+function getInitials(name) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
 
-  if (loading) {
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+function Avatar({ name, avatar, size = "md" }) {
+  const sizeClasses = {
+    sm: "w-8 h-8 text-[10px]",
+    md: "w-12 h-12 text-sm",
+    lg: "w-16 h-16 text-lg",
+  };
+
+  if (avatar) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-[#1DB954] font-black italic animate-pulse text-2xl uppercase tracking-tighter">
-          Loading Elites...
-        </div>
-      </div>
+      <img
+        src={avatar}
+        alt={name}
+        className={`${sizeClasses[size]} rounded-full object-cover border-2 border-white/10`}
+      />
     );
   }
 
-  const topThree = players.slice(0, 3);
-  const theRest = players.slice(3);
+  return (
+    <div
+      className={`${sizeClasses[size]} rounded-full bg-[#1DB954]/20 border-2 border-[#1DB954]/30 flex items-center justify-center font-black text-[#1DB954]`}
+    >
+      {getInitials(name)}
+    </div>
+  );
+}
+
+function PodiumCard({ player, position }) {
+  const config = {
+    1: {
+      order: "order-2",
+      height: "h-32",
+      label: "🥇",
+      ring: "ring-2 ring-yellow-400/60",
+      nameColor: "text-yellow-400",
+    },
+    2: {
+      order: "order-1",
+      height: "h-24",
+      label: "🥈",
+      ring: "ring-2 ring-white/20",
+      nameColor: "text-white",
+    },
+    3: {
+      order: "order-3",
+      height: "h-20",
+      label: "🥉",
+      ring: "ring-2 ring-orange-400/40",
+      nameColor: "text-orange-400",
+    },
+  };
+
+  const c = config[position];
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-12">
-      <div className="max-w-5xl mx-auto">
-        
-        {/* BACK BUTTON */}
-        <button 
-          onClick={() => navigate("/")}
-          className="group mb-8 flex items-center gap-2 text-white/40 hover:text-[#1DB954] transition-all font-black uppercase text-[10px] tracking-widest"
-        >
-          <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:border-[#1DB954]/50 transition-all">
-            ←
-          </div>
-          Return to Arena
-        </button>
+    <div className={`flex flex-col items-center gap-3 ${c.order}`}>
+      <Avatar name={player.ign || player.username} avatar={player.avatar} size="lg" />
+      <div className="text-center">
+        <p className={`font-black uppercase tracking-tight text-sm ${c.nameColor}`}>
+          {player.ign || player.username}
+        </p>
+        <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mt-0.5">
+          {player.totalPoints} pts
+        </p>
+      </div>
+      <div
+        className={`w-full min-w-[80px] ${c.height} bg-white/5 ${c.ring} rounded-t-xl flex items-end justify-center pb-3`}
+      >
+        <span className="text-xl">{c.label}</span>
+      </div>
+    </div>
+  );
+}
 
-        <header className="text-center mb-16">
-          <h1 className="text-6xl font-black italic uppercase tracking-tighter mb-2">
-            Hall of <span className="text-[#1DB954]">Fame</span>
-          </h1>
-          <p className="text-white/40 font-black text-[10px] tracking-[0.5em] uppercase">
-            Global Tournament Rankings
-          </p>
-        </header>
+function LeaderboardRow({ player, rank }) {
+  const rankColor =
+    rank === 1
+      ? "text-yellow-400"
+      : rank === 2
+      ? "text-white/60"
+      : rank === 3
+      ? "text-orange-400"
+      : "text-white/20";
 
-        {/* PODIUM SECTION */}
-        <div className="flex flex-col md:flex-row items-end justify-center gap-4 mb-16 px-4">
-          {topThree[1] && <PodiumCard player={topThree[1]} rank={2} height="h-52" color="border-gray-400" />}
-          {topThree[0] && <PodiumCard player={topThree[0]} rank={1} height="h-72" color="border-[#1DB954]" isGold />}
-          {topThree[2] && <PodiumCard player={topThree[2]} rank={3} height="h-44" color="border-amber-700" />}
+  return (
+    <div className="flex items-center gap-4 bg-[#121212] border border-white/5 rounded-xl px-5 py-4 hover:border-white/10 transition-all">
+      {/* Rank */}
+      <span className={`w-6 text-center font-black text-sm shrink-0 ${rankColor}`}>
+        {rank}
+      </span>
+
+      {/* Avatar */}
+      <Avatar name={player.ign || player.username} avatar={player.avatar} size="sm" />
+
+      {/* Identity */}
+      <div className="flex-1 min-w-0">
+        <p className="text-white font-black text-sm truncate">
+          {player.ign || player.username}
+        </p>
+        <p className="text-white/30 text-[10px] truncate">@{player.username}</p>
+      </div>
+
+      {/* Stats */}
+      <div className="flex gap-6 shrink-0">
+        <div className="text-right">
+          <p className="text-[#1DB954] font-black text-sm">{player.totalPoints}</p>
+          <p className="text-white/30 text-[9px] uppercase tracking-widest">Points</p>
         </div>
-
-        {/* LIST SECTION */}
-        <div className="bg-[#121212] rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl">
-          <div className="grid grid-cols-5 p-6 border-b border-white/5 text-[10px] font-black uppercase tracking-widest text-white/30">
-            <span>Rank</span>
-            <span>Player</span>
-            <span className="text-center">Matches</span>
-            <span className="text-center">Kills</span>
-            <span className="text-right">Total Points</span>
-          </div>
-          
-          <div className="divide-y divide-white/5">
-            {theRest.length > 0 ? (
-              theRest.map((p, index) => (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }} 
-                  whileInView={{ opacity: 1, y: 0 }} 
-                  key={p._id} 
-                  className="grid grid-cols-5 p-6 items-center hover:bg-[#1DB954]/5 transition-colors"
-                >
-                  <span className="font-black italic text-xl text-white/10">#{index + 4}</span>
-                  <div>
-                    <p className="font-bold text-sm text-white">{p.ign}</p>
-                    <p className="text-[9px] text-white/30 font-black uppercase tracking-tighter">@{p.username}</p>
-                  </div>
-                  <span className="text-center font-mono text-sm text-white/60">{p.totalMatches}</span>
-                  <span className="text-center font-mono text-sm text-white/60">{p.totalKills}</span>
-                  <span className="text-right font-black text-[#1DB954] text-2xl italic">{p.totalPoints}</span>
-                </motion.div>
-              ))
-            ) : (
-              players.length < 4 && (
-                <div className="p-10 text-center text-white/10 font-black uppercase text-xs tracking-[0.3em]">
-                  End of Rankings
-                </div>
-              )
-            )}
-          </div>
+        <div className="text-right hidden sm:block">
+          <p className="text-white font-black text-sm">{player.totalKills}</p>
+          <p className="text-white/30 text-[9px] uppercase tracking-widest">Kills</p>
+        </div>
+        <div className="text-right hidden sm:block">
+          <p className="text-white font-black text-sm">{player.totalMatches}</p>
+          <p className="text-white/30 text-[9px] uppercase tracking-widest">Matches</p>
         </div>
       </div>
     </div>
   );
 }
 
-function PodiumCard({ player, rank, height, color, isGold }) {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      className={`relative flex flex-col items-center w-full md:w-64 bg-[#121212] border-t-4 ${color} rounded-t-[2.5rem] p-6 ${height} justify-center shadow-2xl`}
-    >
-      <div className={`absolute -top-6 w-12 h-12 rounded-full flex items-center justify-center font-black text-xl border-4 bg-black ${color} ${isGold ? 'text-[#1DB954]' : 'text-white'}`}>
-        {rank}
-      </div>
-      <p className="text-[10px] font-black text-white/40 uppercase mb-1 tracking-widest">Global Elite</p>
-      
-      <h3 className={`text-2xl font-black truncate w-full text-center uppercase italic ${isGold ? 'text-[#1DB954]' : 'text-white'}`}>
-        {player.ign}
-      </h3>
-      
-      <div className="mt-4 text-center">
-        <p className="text-5xl font-black tracking-tighter text-white">{player.totalPoints}</p>
-        <p className={`text-[9px] font-black uppercase tracking-[0.2em] ${isGold ? 'text-[#1DB954]' : 'text-white/20'}`}>
-          Total Score
-        </p>
-        <div className="mt-2 flex gap-2 justify-center opacity-40">
-           <span className="text-[9px] font-bold uppercase">{player.totalKills} Kills</span>
-           <span className="text-[9px] font-bold text-white/50">|</span>
-           <span className="text-[9px] font-bold uppercase">{player.totalMatches} Matches</span>
+// ── Page ───────────────────────────────────────────────────────────────────
+
+export default function Leaderboard() {
+  const [players, setPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await getLeaderboard();
+        setPlayers(data);
+      } catch (err) {
+        console.error("Failed to fetch leaderboard:", err);
+        setError("Failed to load leaderboard. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLeaderboard();
+  }, []);
+
+  // ── Render: loading ──────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
+          <p className="text-white/30 text-xs font-black uppercase tracking-widest">
+            Loading leaderboard...
+          </p>
         </div>
       </div>
-    </motion.div>
+    );
+  }
+
+  // ── Render: error ────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+        <div className="text-center">
+          <p className="text-red-400 text-sm font-black uppercase tracking-widest mb-6">
+            {error}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-white text-black font-black uppercase tracking-widest text-xs px-8 py-3 rounded-xl hover:bg-[#1DB954] transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: empty ────────────────────────────────────────────────────────
+  if (players.length === 0) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+        <div className="text-center">
+          <p className="text-white/30 text-sm font-black uppercase tracking-widest">
+            No rankings yet. Complete tournaments to appear here.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const top3 = players.slice(0, 3);
+  const rest = players.slice(3);
+
+  // ── Render: main ─────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-black text-white p-6 md:p-10">
+      <div className="max-w-3xl mx-auto">
+        {/* Page header */}
+        <header className="mb-10">
+          <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-[0.4em] mb-2">
+            Global Rankings
+          </p>
+          <h1 className="text-3xl font-black italic uppercase tracking-tighter text-white">
+            Leaderboard
+          </h1>
+          <p className="text-white/30 text-xs mt-2">
+            Top {players.length} players ranked by total points
+          </p>
+        </header>
+
+        {/* Podium — top 3 */}
+        {top3.length >= 2 && (
+          <div className="flex items-end justify-center gap-4 mb-12">
+            {top3.map((player, i) => (
+              <PodiumCard key={player._id} player={player} position={i + 1} />
+            ))}
+          </div>
+        )}
+
+        {/* Full ranked list */}
+        <div className="flex flex-col gap-3">
+          {players.map((player, i) => (
+            <LeaderboardRow key={player._id} player={player} rank={i + 1} />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

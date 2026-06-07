@@ -1,81 +1,255 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import axios from "axios";
-import { motion } from "framer-motion";
+// frontend/src/pages/MyMatches.jsx
+
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import { getRegisteredTournaments } from "../api/tournaments.api";
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const STATUS_CONFIG = {
+  LIVE: {
+    label: "LIVE",
+    classes:
+      "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse",
+  },
+  UPCOMING: {
+    label: "UPCOMING",
+    classes: "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30",
+  },
+  AWAITING_RESULTS: {
+    label: "RESULTS PENDING",
+    classes: "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+  },
+  COMPLETED: {
+    label: "COMPLETED",
+    classes: "bg-white/10 text-white/50 border border-white/10",
+  },
+};
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+function StatusBadge({ status }) {
+  const config = STATUS_CONFIG[status] ?? {
+    label: status,
+    classes: "bg-white/10 text-white/40 border border-white/10",
+  };
+  return (
+    <span
+      className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${config.classes}`}
+    >
+      {config.label}
+    </span>
+  );
+}
+
+function MatchCard({ match, userId }) {
+  const navigate = useNavigate();
+
+  const myParticipant = match.participants?.find(
+    (p) => p.user === userId || p.user?._id === userId
+  );
+
+  const formattedDate = match.startTime
+    ? new Date(match.startTime).toLocaleString("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "TBA";
+
+  const hasResults =
+    Array.isArray(match.results) && match.results.length > 0;
+
+  return (
+    <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-4 hover:border-white/10 transition-all">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <h3 className="text-white font-black uppercase tracking-tight text-base truncate">
+            {match.title}
+          </h3>
+          <p className="text-white/40 text-[11px] font-medium mt-1">
+            {formattedDate}
+          </p>
+        </div>
+        <StatusBadge status={match.status} />
+      </div>
+
+      {/* Match metadata */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-black/40 rounded-xl p-3 text-center">
+          <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+            Mode
+          </p>
+          <p className="text-white text-[11px] font-black uppercase">
+            {match.matchCategory?.replace("_", " ") ?? "—"}
+          </p>
+        </div>
+        <div className="bg-black/40 rounded-xl p-3 text-center">
+          <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+            Prize Pool
+          </p>
+          <p className="text-[#1DB954] text-[11px] font-black">
+            ₹{match.prizePool?.toLocaleString("en-IN") ?? "0"}
+          </p>
+        </div>
+        <div className="bg-black/40 rounded-xl p-3 text-center">
+          <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+            Your IGN
+          </p>
+          <p className="text-white text-[11px] font-black truncate">
+            {myParticipant?.ign ?? "—"}
+          </p>
+        </div>
+      </div>
+
+      {/* Awaiting results notice */}
+      {match.status === "AWAITING_RESULTS" && (
+        <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl px-4 py-3">
+          <p className="text-blue-400 text-[10px] font-black uppercase tracking-widest">
+            ⏳ Match ended — results are being finalized by the admin
+          </p>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex gap-3 pt-1">
+        <button
+          onClick={() => navigate(`/tournaments/view/${match._id}`)}
+          className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest py-2.5 rounded-xl transition-all"
+        >
+          Match Detail
+        </button>
+        {match.status === "COMPLETED" && hasResults && (
+          <button
+            onClick={() =>
+              navigate(`/tournaments/${match._id}/results`)
+            }
+            className="flex-1 bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/20 text-[#1DB954] text-[10px] font-black uppercase tracking-widest py-2.5 rounded-xl transition-all"
+          >
+            View Results
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState() {
+  const navigate = useNavigate();
+  return (
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-6">
+        <span className="text-2xl">🎮</span>
+      </div>
+      <h3 className="text-white font-black uppercase tracking-widest text-sm mb-2">
+        No Matches Yet
+      </h3>
+      <p className="text-white/30 text-xs max-w-xs mb-8">
+        You have not joined any tournaments. Head to the lobby to find
+        your next match.
+      </p>
+      <button
+        onClick={() => navigate("/tournaments")}
+        className="bg-[#1DB954] text-black font-black uppercase tracking-widest text-xs px-8 py-3 rounded-xl hover:bg-white transition-all"
+      >
+        Browse Tournaments
+      </button>
+    </div>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
 
 export default function MyMatches() {
-  const [matches, setMatches] = useState([]);
+  const { user } = useAuth();
+  const [myMatches, setMyMatches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchMyMatches = async () => {
       try {
-        const token = localStorage.getItem("token");
-        const res = await axios.get("http://localhost:5000/api/tournaments/registered", {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setMatches(res.data);
+        setLoading(true);
+        setError(null);
+        const data = await getRegisteredTournaments();
+        setMyMatches(data);
       } catch (err) {
-        console.error("Fetch Error:", err);
+        console.error("Failed to fetch registered matches:", err);
+        setError("Failed to load your matches. Please try again.");
       } finally {
         setLoading(false);
       }
     };
+
     fetchMyMatches();
   }, []);
 
-  const getStatusBadge = (match) => {
-    const now = new Date().getTime();
-    const startTime = new Date(match.startTime).getTime();
-    const diff = (startTime - now) / 60000;
+  // ── Render: loading ──────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
+          <p className="text-white/30 text-xs font-black uppercase tracking-widest">
+            Loading your matches...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-    if (match.status === "COMPLETED") return <span className="text-[10px] bg-white/10 px-3 py-1 rounded-full text-white/40 font-black">FINISHED</span>;
-    if (match.status === "LIVE") return <span className="text-[10px] bg-red-600 px-3 py-1 rounded-full text-white font-black animate-pulse">LIVE NOW</span>;
-    if (diff <= 15 && diff > 0) return <span className="text-[10px] bg-[#1DB954] px-3 py-1 rounded-full text-black font-black shadow-[0_0_10px_#1DB954]">ROOM OPEN</span>;
-    return <span className="text-[10px] bg-yellow-500 px-3 py-1 rounded-full text-black font-black">UPCOMING</span>;
-  };
+  // ── Render: error ────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+        <div className="text-center">
+          <p className="text-red-400 text-sm font-black uppercase tracking-widest mb-6">
+            {error}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-white text-black font-black uppercase tracking-widest text-xs px-8 py-3 rounded-xl hover:bg-[#1DB954] transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-  if (loading) return <div className="h-screen bg-black flex items-center justify-center text-[#1DB954] font-black tracking-widest uppercase">Syncing Hub...</div>;
-
+  // ── Render: main ─────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-12">
-      <div className="max-w-6xl mx-auto">
-        <header className="mb-12">
-          <h1 className="text-6xl md:text-8xl font-black italic tracking-tighter uppercase mb-4">My Hub</h1>
-          <p className="text-[#1DB954] font-black text-[10px] tracking-[0.4em] uppercase">Your Private Battlefront</p>
+    <div className="min-h-screen bg-black text-white p-6 md:p-10">
+      <div className="max-w-3xl mx-auto">
+
+        {/* Page header */}
+        <header className="mb-10">
+          <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-[0.4em] mb-2">
+            Player Hub
+          </p>
+          <h1 className="text-3xl font-black italic uppercase tracking-tighter text-white">
+            My Matches
+          </h1>
+          {myMatches.length > 0 && (
+            <p className="text-white/30 text-xs mt-2">
+              {myMatches.length} tournament
+              {myMatches.length !== 1 ? "s" : ""} registered
+            </p>
+          )}
         </header>
 
-        {matches.length === 0 ? (
-          <div className="bg-[#121212] border border-white/5 rounded-[3rem] p-20 text-center">
-            <p className="text-white/20 font-black uppercase mb-8">No active registrations.</p>
-            <Link to="/tournaments" className="bg-[#1DB954] text-black px-10 py-5 rounded-xl font-black text-xs uppercase hover:scale-105 transition-all inline-block">Explore Lobby</Link>
-          </div>
+        {/* Match list or empty state */}
+        {myMatches.length === 0 ? (
+          <EmptyState />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {matches.map((match) => (
-              <motion.div 
+          <div className="flex flex-col gap-4">
+            {myMatches.map((match) => (
+              <MatchCard
                 key={match._id}
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-[#121212] border border-white/5 rounded-[2.5rem] overflow-hidden group hover:border-[#1DB954]/40 transition-all"
-              >
-                <div className="h-40 relative">
-                  <img src={match.banner} alt="banner" className="w-full h-full object-cover opacity-30" />
-                  <div className="absolute top-6 left-6">{getStatusBadge(match)}</div>
-                </div>
-                <div className="p-8">
-                  <h3 className="text-2xl font-black uppercase italic mb-6">{match.title}</h3>
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <p className="text-[9px] text-white/30 font-black uppercase tracking-widest mb-1">Match Start</p>
-                      <p className="text-sm font-bold">{new Date(match.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                    </div>
-                    <Link to={`/tournaments/view/${match._id}`} className="bg-white/5 hover:bg-[#1DB954] hover:text-black p-4 rounded-2xl transition-all">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                    </Link>
-                  </div>
-                </div>
-              </motion.div>
+                match={match}
+                userId={user?._id ?? user?.id}
+              />
             ))}
           </div>
         )}

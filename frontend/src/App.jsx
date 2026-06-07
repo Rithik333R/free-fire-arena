@@ -1,80 +1,221 @@
+// frontend/src/App.jsx
+
 import { useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useAuth } from "./context/AuthContext";
+import { useAuth } from "./hooks/useAuth";
+
+// Layout
 import Sidebar from "./components/Sidebar";
-import Home from "./pages/Home";
+
+// Public / Auth pages
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+
+// Player pages
+import Home from "./pages/Home";
 import Tournaments from "./pages/Tournaments";
 import TournamentDetail from "./pages/TournamentDetail";
+import MatchResults from "./pages/MatchResults";
 import MyMatches from "./pages/MyMatches";
-import AdminPanel from "./pages/AdminPanel";
-import Leaderboard from './pages/Leaderboard';
+import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
 
+// Admin pages
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import CreateTournament from "./pages/admin/CreateTournament";
+import EditTournament from "./pages/admin/EditTournament";
+import SetRoomCredentials from "./pages/admin/SetRoomCredentials";
+import PublishResults from "./pages/admin/PublishResults";
+
+// ── Route Guards ───────────────────────────────────────────────────────────
+
+function RequireAuth({ children }) {
+  const { token } = useAuth();
+  if (!token) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireAdmin({ children }) {
+  const { token, user } = useAuth();
+  if (!token) return <Navigate to="/login" replace />;
+  if (user?.role !== "ADMIN") return <Navigate to="/" replace />;
+  return children;
+}
+
+function RequireGuest({ children }) {
+  const { token } = useAuth();
+  if (token) return <Navigate to="/" replace />;
+  return children;
+}
+
+// ── Shared Header ──────────────────────────────────────────────────────────
+
+function AppHeader({ onOpenSidebar }) {
+  return (
+    <header className="sticky top-0 z-30 bg-black/50 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center">
+      <button
+        onClick={onOpenSidebar}
+        aria-label="Open navigation menu"
+        className="text-2xl p-2 rounded-full hover:bg-white/10 transition-colors text-white"
+      >
+        ☰
+      </button>
+    </header>
+  );
+}
+
+// ── App ────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [open, setOpen] = useState(false);
-  const { token, user, loading } = useAuth(); 
+  const { token, loading } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Prevent rendering if the AuthContext is still checking the local token
   if (loading) {
     return (
-      <div className="h-screen bg-black flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-black text-white font-sans overflow-x-hidden">
-      {/* Sidebar: Only visible when logged in */}
-      {token && <Sidebar open={open} setOpen={setOpen} />} 
+    <div className="min-h-screen bg-black">
+      {token && (
+        <Sidebar open={sidebarOpen} setOpen={setSidebarOpen} />
+      )}
 
-      <main className="flex-1"> 
-        <Routes>
-          {/* DASHBOARD */}
-          <Route 
-            path="/" 
-            element={token ? <Home open={open} setOpen={setOpen} /> : <Navigate to="/login" />} 
-          />
-          
-          {/* PUBLIC TOURNAMENT ROUTES */}
-          <Route path="/tournaments" element={<Tournaments setOpen={setOpen} />} />
-          <Route path="/tournaments/view/:id" element={<TournamentDetail setOpen={setOpen} />} />
-          
-          {/* ✅ LEADERBOARD ROUTE ADDED HERE */}
-          <Route path="/leaderboard" element={<Leaderboard />} />
+      <div className="flex flex-col min-h-screen">
+        {token && (
+          <AppHeader onOpenSidebar={() => setSidebarOpen(true)} />
+        )}
 
-          {/* MY HUB */}
-          <Route 
-            path="/my-matches" 
-            element={token ? <MyMatches setOpen={setOpen} /> : <Navigate to="/login" />} 
-          />
+        <main className="flex-1 overflow-y-auto">
+          <Routes>
 
-          {/* ADMIN CONTROL PANEL - Protected by Role */}
-          <Route 
-            path="/admin" 
-            element={
-              (token && user?.role === "ADMIN") 
-                ? <AdminPanel /> 
-                : <Navigate to="/" />
-            } 
-          />
+            {/* ── Guest-only routes ────────────────────────────────── */}
+            <Route
+              path="/login"
+              element={
+                <RequireGuest>
+                  <Login />
+                </RequireGuest>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <RequireGuest>
+                  <Register />
+                </RequireGuest>
+              }
+            />
 
-          <Route 
-  path="/profile" 
-  element={token ? <Profile /> : <Navigate to="/login" />} 
-/>
+            {/* ── Authenticated player routes ──────────────────────── */}
+            <Route
+              path="/"
+              element={
+                <RequireAuth>
+                  <Home />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/tournaments"
+              element={
+                <RequireAuth>
+                  <Tournaments />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/tournaments/view/:id"
+              element={
+                <RequireAuth>
+                  <TournamentDetail />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/tournaments/:id/results"
+              element={
+                <RequireAuth>
+                  <MatchResults />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/my-matches"
+              element={
+                <RequireAuth>
+                  <MyMatches />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/leaderboard"
+              element={
+                <RequireAuth>
+                  <Leaderboard />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <RequireAuth>
+                  <Profile />
+                </RequireAuth>
+              }
+            />
 
-          {/* AUTH ROUTES */}
-          <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
-          <Route path="/register" element={!token ? <Register /> : <Navigate to="/" />} />
+            {/* ── Admin-only routes ────────────────────────────────── */}
+            <Route
+              path="/admin"
+              element={
+                <RequireAdmin>
+                  <AdminDashboard />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/tournaments/new"
+              element={
+                <RequireAdmin>
+                  <CreateTournament />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/tournaments/:id/edit"
+              element={
+                <RequireAdmin>
+                  <EditTournament />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/tournaments/:id/room"
+              element={
+                <RequireAdmin>
+                  <SetRoomCredentials />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/admin/tournaments/:id/results"
+              element={
+                <RequireAdmin>
+                  <PublishResults />
+                </RequireAdmin>
+              }
+            />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </main>
+            {/* ── Fallback ─────────────────────────────────────────── */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+
+          </Routes>
+        </main>
+      </div>
     </div>
   );
 }

@@ -1,22 +1,31 @@
-import { createContext, useContext, useState, useEffect } from "react";
+// frontend/src/context/AuthContext.jsx
 
-const AuthContext = createContext();
+import { createContext, useState } from "react";
 
-export function AuthProvider({ children }) {
-  // 1. Initialize from localStorage so data persists on refresh
-  const [token, setToken] = useState(localStorage.getItem("token"));
+// AuthContext is exported so useAuth (in hooks/useAuth.js) can reference it,
+// and so the provider can be imported in main.jsx or App.jsx.
+export const AuthContext = createContext(null);
+
+export default function AuthProvider({ children }) {
+  const [token, setToken] = useState(() => localStorage.getItem("token") || null);
   const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("user");
-    return savedUser ? JSON.parse(savedUser) : null;
+    try {
+      const stored = localStorage.getItem("user");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
   });
-  const [loading, setLoading] = useState(false);
 
-  // 2. Updated login function to handle the USER object
-  const login = (userData, newToken) => {
+  // loading is kept for future use (e.g. token validation on startup in Phase E).
+  // It is intentionally not wired to anything yet — that work is scoped to Phase E.
+  const [loading] = useState(false);
+
+  const login = (newToken, newUser) => {
     localStorage.setItem("token", newToken);
-    localStorage.setItem("user", JSON.stringify(userData));
+    localStorage.setItem("user", JSON.stringify(newUser));
     setToken(newToken);
-    setUser(userData);
+    setUser(newUser);
   };
 
   const logout = () => {
@@ -27,17 +36,8 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ token, user, login, logout, loading }}>
+    <AuthContext.Provider value={{ token, user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 }
-
-// Export the hook separately to help Vite's Fast Refresh
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
-};

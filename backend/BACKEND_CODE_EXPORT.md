@@ -1,3 +1,14 @@
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\.env
+
+PORT=5000
+MONGO_URI=mongodb+srv://root:root@cluster0.4mmzvkw.mongodb.net/authdb?retryWrites=true&w=majority
+JWT_SECRET=b09fd966cb176dc30c67a3e4811c42e1482f80c2492035b58a204ab32b8ff8bd
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\package-lock.json
+
 {
   "name": "backend",
   "version": "1.0.0",
@@ -1556,3 +1567,750 @@
     }
   }
 }
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\package.json
+
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.0.2",
+    "node-cron": "^4.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\server.js
+
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import connectDB from "./config/db.js";
+
+// Your custom routes
+import authRoutes from "./routes/auth.routes.js";
+import userRoutes from "./routes/user.routes.js";
+import tournamentRoutes from "./routes/tournament.routes.js"; 
+import adminRoutes from "./routes/admin.routes.js";
+import leaderboardRoutes from "./routes/leaderboard.routes.js";
+
+// ⏱️ NEW: Import the Cron Job Scheduler
+import startCronJobs from "./cron/statusUpdater.js";
+
+dotenv.config();
+
+// Connect to Database
+connectDB();
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// API Endpoints
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/tournaments", tournamentRoutes); 
+app.use("/api/admin", adminRoutes); 
+app.use("/api/leaderboard", leaderboardRoutes);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  
+  // 🚀 NEW: Start the Match Automation Engine
+  startCronJobs();
+});
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\config\db.js
+
+import mongoose from "mongoose";
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("MongoDB Connected");
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+};
+
+export default connectDB;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\controllers\auth.controller.js
+
+import User from "../models/User.js";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+export const register = async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ message: "User already exists" });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const newUser = new User({
+      username,
+      email,
+      password: hashedPassword,
+      role: "USER" // Default role
+    });
+
+    await newUser.save();
+    res.status(201).json({ message: "User registered successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Registration failed", error: error.message });
+  }
+};
+
+export const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+
+    // CRITICAL: Include the role in the token payload
+    const token = jwt.sign(
+      { id: user._id, role: user.role }, 
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        role: user.role // Send to frontend for Sidebar logic
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Login failed" });
+  }
+};
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\cron\statusUpdater.js
+
+import cron from "node-cron";
+import Tournament from "../models/Tournament.js";
+
+const startCronJobs = () => {
+  // The string '* * * * *' means "Run this every 1 minute"
+  cron.schedule("* * * * *", async () => {
+    try {
+      const now = new Date();
+
+      // 1. UPCOMING ➡️ LIVE
+      // Find matches where status is UPCOMING but the start time has passed
+      const liveResult = await Tournament.updateMany(
+        { 
+          status: "UPCOMING", 
+          startTime: { $lte: now } 
+        },
+        { 
+          $set: { status: "LIVE" } 
+        }
+      );
+
+      if (liveResult.modifiedCount > 0) {
+        console.log(`⚔️ [CRON] Status Update: ${liveResult.modifiedCount} matches just went LIVE.`);
+      }
+
+      // 2. LIVE ➡️ COMPLETED
+      // Find matches where status is LIVE but the end time has passed
+      const completedResult = await Tournament.updateMany(
+        { 
+          status: "LIVE", 
+          endTime: { $lte: now } 
+        },
+        { 
+          $set: { status: "COMPLETED" } 
+        }
+      );
+
+      if (completedResult.modifiedCount > 0) {
+        console.log(`🏁 [CRON] Status Update: ${completedResult.modifiedCount} matches just COMPLETED.`);
+      }
+
+    } catch (error) {
+      console.error("❌ [CRON Error] Failed to update match statuses:", error);
+    }
+  });
+
+  console.log("⏱️  Match Scheduler Engine Started. Monitoring times...");
+};
+
+export default startCronJobs;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\middleware\admin.middleware.js
+
+const adminMiddleware = (req, res, next) => {
+  // Check if req.user (set by authMiddleware) exists and has the ADMIN role
+  if (req.user && req.user.role === "ADMIN") {
+    next();
+  } else {
+    res.status(403).json({ message: "Access Denied: Admin privileges required." });
+  }
+};
+
+export default adminMiddleware;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\middleware\auth.middleware.js
+
+import jwt from "jsonwebtoken";
+
+const authMiddleware = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token, authorization denied" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // This decoded object MUST have { id, role }
+    req.user = decoded; 
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Token is not valid" });
+  }
+};
+
+export default authMiddleware;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\models\Tournament.js
+
+import mongoose from "mongoose";
+
+const tournamentSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  game: { type: String, default: "Free Fire" },
+  matchCategory: { 
+    type: String, 
+    enum: ["BATTLE_ROYALE", "CLASH_SQUAD", "LONE_WOLF"], 
+    required: true,
+    default: "CLASH_SQUAD" 
+  },
+  matchType: { type: String, enum: ["1v1", "2v2", "3v3", "4v4"], default: "4v4" },
+  map: { type: String, default: "Bermuda" },
+  description: { type: String, default: "Standard Clash Squad Tournament" },
+  rules: { 
+    type: [String], 
+    default: ["No Hacks", "No Grenades", "Join 15 mins before"] 
+  },
+  banner: { type: String, default: "https://wallpaperaccess.com/full/2155823.jpg" },
+
+  startTime: { type: Date, required: true },
+  endTime: { type: Date, required: true },
+  entryFee: { type: Number, default: 0 },
+  prizePool: { type: Number, required: true },
+  maxPlayers: { type: Number, required: true },
+
+  status: {
+    type: String,
+    enum: ["UPCOMING", "LIVE", "COMPLETED"],
+    default: "UPCOMING",
+  },
+
+  participants: [
+    {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      ign: { type: String, required: true },
+      uid: { type: String, required: true },
+      kills: { type: Number, default: 0 },
+      rank: { type: Number, default: 0 },
+      joinedAt: { type: Date, default: Date.now }
+    }
+  ],
+
+  results: [
+    {
+      rank: String,
+      ign: String,
+      kills: Number,
+      prize: Number
+    }
+  ],
+  
+  // ✅ These are now properly inside the object!
+  roomId: { type: String, select: false }, 
+  roomPassword: { type: String, select: false }
+
+}, { timestamps: true });
+
+export default mongoose.model("Tournament", tournamentSchema);
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\models\User.js
+
+import mongoose from "mongoose";
+
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  role: { 
+    type: String, 
+    enum: ["USER", "ADMIN"], 
+    default: "USER" 
+  },
+}, { timestamps: true });
+
+// Check if the model exists before creating it (prevents errors in some environments)
+const User = mongoose.models.User || mongoose.model("User", userSchema);
+
+// THIS IS THE LINE YOU ARE LIKELY MISSING:
+export default User;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\routes\admin.routes.js
+
+import express from "express";
+import Tournament from "../models/Tournament.js";
+import authMiddleware from "../middleware/auth.middleware.js";
+import adminMiddleware from "../middleware/admin.middleware.js";
+
+const router = express.Router();
+
+// @route   GET /api/admin/tournaments
+// @desc    Get all tournaments for admin management
+router.get("/tournaments", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const tournaments = await Tournament.find().sort({ startTime: -1 });
+    res.json(tournaments);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch tournaments" });
+  }
+});
+
+// @route   PATCH /api/admin/tournaments/:id/room
+// @desc    Update Room Credentials, Status, and Participant Results
+router.patch("/tournaments/:id/room", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { roomId, roomPassword, status, participants } = req.body;
+    
+    // Using .select("+roomId +roomPassword") to allow modification of hidden fields
+    const tournament = await Tournament.findById(req.params.id).select("+roomId +roomPassword");
+    if (!tournament) return res.status(404).json({ message: "Match not found" });
+
+    if (roomId !== undefined) tournament.roomId = roomId;
+    if (roomPassword !== undefined) tournament.roomPassword = roomPassword;
+    if (status !== undefined) tournament.status = status;
+
+    // ✅ FIX: Saving participant results (kills/ranks)
+    if (Array.isArray(participants)) {
+      tournament.participants = participants.map(p => ({
+        ...p,
+        kills: Number(p.kills) || 0,
+        rank: Number(p.rank) || 0
+      }));
+    }
+
+    await tournament.save();
+    
+    // Security: Do not return the tournament object with secrets
+    res.json({ success: true, message: "Tournament updated successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+export default router;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\routes\auth.routes.js
+
+import express from "express";
+import { register, login } from "../controllers/auth.controller.js";
+
+const router = express.Router();
+
+router.post("/register", register);
+router.post("/login", login);
+
+export default router;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\routes\leaderboard.routes.js
+
+import express from "express";
+import Tournament from "../models/Tournament.js";
+import User from "../models/User.js";
+
+const router = express.Router();
+
+// @route   GET /api/leaderboard
+// @desc    Get top players based on total points (Mode-Specific Logic)
+router.get("/", async (req, res) => {
+  try {
+    const leaderboard = await Tournament.aggregate([
+      { $match: { status: "COMPLETED" } },
+      { $unwind: "$participants" },
+      {
+        $group: {
+          _id: "$participants.user",
+          // ✅ MODE-SPECIFIC SCORING LOGIC
+          totalPoints: {
+            $sum: {
+              $cond: [
+                { $eq: ["$matchCategory", "BATTLE_ROYALE"] },
+                // BR Logic: (Rank 1 ? 20pts : 0pts) + Kills
+                { 
+                  $add: [
+                    { $cond: [{ $eq: ["$participants.rank", 1] }, 20, 0] },
+                    "$participants.kills"
+                  ] 
+                },
+                // CS / Lone Wolf Logic: Just Kills (Placement points disabled)
+                "$participants.kills"
+              ]
+            }
+          },
+          totalKills: { $sum: "$participants.kills" },
+          totalMatches: { $sum: 1 },
+          ign: { $last: "$participants.ign" }
+        }
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userDetails"
+        }
+      },
+      { $unwind: "$userDetails" },
+      {
+        $project: {
+          _id: 1,
+          ign: 1,
+          username: "$userDetails.username",
+          totalPoints: 1,
+          totalKills: 1,
+          totalMatches: 1,
+          avatar: "$userDetails.avatar"
+        }
+      },
+      // Sort by Points now instead of just Kills
+      { $sort: { totalPoints: -1 } },
+      { $limit: 50 }
+    ]);
+
+    res.json(leaderboard);
+  } catch (err) {
+    console.error("Leaderboard Error:", err);
+    res.status(500).json({ message: "Failed to generate leaderboard" });
+  }
+});
+
+export default router;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\routes\tournament.routes.js
+
+import express from "express";
+import Tournament from "../models/Tournament.js";
+import authMiddleware from "../middleware/auth.middleware.js";
+import jwt from "jsonwebtoken";
+
+const router = express.Router();
+
+// 1. PUBLIC: Get all tournaments for the Lobby
+router.get("/", async (req, res) => {
+  try {
+    const tournaments = await Tournament.find().sort({ startTime: 1 });
+    res.json(tournaments);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch lobby." });
+  }
+});
+
+// 🚀 2. ADMIN: DEPLOY NEW MATCH
+router.post("/", async (req, res) => {
+  try {
+    const newTournament = new Tournament(req.body);
+    const savedTournament = await newTournament.save();
+    res.status(201).json(savedTournament);
+  } catch (err) {
+    console.error("❌ Error deploying match:", err);
+    res.status(500).json({ error: "Failed to deploy tournament to database" });
+  }
+});
+
+// 🚀 3. ADMIN: INJECT ROOM CREDENTIALS
+router.put("/:id/credentials", async (req, res) => {
+  try {
+    const { roomId, roomPassword } = req.body;
+    
+    // Find the match and update only the credentials
+    const updatedMatch = await Tournament.findByIdAndUpdate(
+      req.params.id,
+      { roomId, roomPassword },
+      { new: true } // Returns the updated document
+    );
+
+    if (!updatedMatch) {
+      return res.status(404).json({ message: "Match not found." });
+    }
+
+    res.status(200).json(updatedMatch);
+  } catch (err) {
+    console.error("❌ Error injecting credentials:", err);
+    res.status(500).json({ error: "Failed to update match credentials." });
+  }
+});
+
+    // 🚀 4. ADMIN: PUBLISH FINAL RESULTS
+router.put("/:id/results", authMiddleware, async (req, res) => {
+  try {
+    const { results } = req.body;
+    
+    // Update the match to COMPLETED and inject the results array
+    const updatedMatch = await Tournament.findByIdAndUpdate(
+      req.params.id,
+      { 
+        status: "COMPLETED", 
+        results: results 
+      },
+      { new: true }
+    );
+
+    if (!updatedMatch) return res.status(404).json({ message: "Match not found." });
+    res.status(200).json(updatedMatch);
+  } catch (err) {
+    console.error("❌ Error publishing results:", err);
+    res.status(500).json({ error: "Failed to publish match results." });
+  }
+});
+
+// 5. SECURE: Get only tournaments the logged-in user joined
+router.get("/registered", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const matches = await Tournament.find({ 
+      "participants.user": userId 
+    }).sort({ startTime: 1 });
+    res.json(matches);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching your matches." });
+  }
+});
+
+// 6. SECURE REVEAL: Get specific tournament details
+router.get("/:id", authMiddleware, async (req, res) => {
+  try {
+    // Fetch base data first
+    const tournament = await Tournament.findById(req.params.id);
+    if (!tournament) return res.status(404).json({ message: "Tournament not found." });
+
+    const userId = req.user.id;
+    const now = new Date();
+    const startTime = new Date(tournament.startTime);
+    const fifteenMinsBefore = new Date(startTime.getTime() - 15 * 60000);
+
+    // CRITICAL SECURITY CHECK
+    const isRegistered = tournament.participants.some(
+      (p) => p.user.toString() === userId.toString()
+    );
+
+    let revealedData = tournament.toObject();
+
+    // Only fetch secrets if: 1. Time is right AND 2. User is registered
+    if (now >= fifteenMinsBefore && isRegistered) {
+      // ✅ Explicitly pull hidden fields only when authorized
+      const secureMatch = await Tournament.findById(req.params.id).select("+roomId +roomPassword");
+      revealedData.roomId = secureMatch.roomId;
+      revealedData.roomPassword = secureMatch.roomPassword;
+    } else {
+      // Masking the data for unauthorized/early requests
+      revealedData.roomId = "REVEALING 15M BEFORE START";
+      revealedData.roomPassword = "REVEALING 15M BEFORE START";
+    }
+
+    res.json(revealedData);
+  } catch (err) {
+    res.status(500).json({ message: "Server error." });
+  }
+});
+
+// 7. JOIN ARENA
+router.post("/:id/join", authMiddleware, async (req, res) => {
+  try {
+    const { ign, uid } = req.body;
+    const tournament = await Tournament.findById(req.params.id);
+    
+    if (!tournament || tournament.status !== "UPCOMING") {
+      return res.status(400).json({ message: "Registration is not open." });
+    }
+
+    const alreadyJoined = tournament.participants.some(p => p.user.toString() === req.user.id);
+    if (alreadyJoined) return res.status(400).json({ message: "Already in this tournament." });
+
+    tournament.participants.push({ user: req.user.id, ign, uid });
+    await tournament.save();
+    res.status(200).json({ success: true, message: "Registered successfully!" });
+  } catch (error) {
+    res.status(500).json({ message: "Join failed." });
+  }
+});
+
+export default router;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\routes\user.routes.js
+
+import express from "express";
+import authMiddleware from "../middleware/auth.middleware.js";
+
+const router = express.Router();
+
+router.get("/me", authMiddleware, (req, res) => {
+  res.json({
+    message: "Protected route accessed",
+    user: req.user
+  });
+});
+
+export default router;
+
+
+# FILE: C:\Users\Lenovo\Desktop\ff\backend\src\scripts\seedTournaments.js
+
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
+import Tournament from "../models/Tournament.js"; 
+import User from "../models/User.js"; 
+
+dotenv.config();
+
+await mongoose.connect(process.env.MONGO_URI);
+console.log("📡 Connected to MongoDB for seeding...");
+
+async function seed() {
+  try {
+    // 1. Clear existing data
+    await Tournament.deleteMany();
+    await User.deleteMany();
+    console.log("🗑️ Old tournaments and users cleared.");
+
+    // 2. Create Hashed Passwords
+    const adminPassword = await bcrypt.hash("admin123", 10);
+    const playerPassword = await bcrypt.hash("player123", 10);
+
+    // 3. Create Admin User
+    const adminUser = new User({
+      username: "Rithik_Admin",
+      email: "admin@test.com",
+      password: adminPassword,
+      role: "ADMIN"
+    });
+    await adminUser.save();
+    console.log("👑 Admin account created: admin@test.com / admin123");
+
+    // 4. Create Regular Player
+    const regularUser = new User({
+      username: "testplayer",
+      email: "test@gmail.com",
+      password: playerPassword,
+      role: "USER",
+      fairPlayScore: 100
+    });
+    await regularUser.save();
+
+    // 5. Insert Tournaments
+    await Tournament.insertMany([
+      {
+        title: "Reveal Test Match",
+        game: "Free Fire",
+        matchType: "4v4",
+        map: "Kalahari",
+        description: "TEST MATCH: Starts in 10 minutes. ID should appear for participants!",
+        rules: ["Logic Test", "Verify Room ID appearance"],
+        startTime: new Date(Date.now() + 10 * 60 * 1000), 
+        endTime: new Date(Date.now() + 60 * 60 * 1000),
+        prizePool: 500,
+        maxPlayers: 8,
+        status: "UPCOMING",
+        roomId: "AX-7788990", 
+        roomPassword: "JOIN_QUICK_123",
+        participants: [{ user: adminUser._id, ign: "ADMIN_PRO", uid: "123456789" }]
+      },
+      {
+        title: "CS 4v4 Sunday Cup",
+        game: "Free Fire",
+        matchType: "4v4",
+        map: "Bermuda (Remastered)",
+        description: "Weekly Clash Squad tournament.",
+        startTime: new Date(Date.now() + 1440 * 60 * 1000), 
+        endTime: new Date(Date.now() + 1500 * 60 * 1000),
+        prizePool: 1000,
+        maxPlayers: 8,
+        status: "UPCOMING",
+      },
+      {
+        title: "1v1 King of Hill",
+        game: "Free Fire",
+        matchType: "1v1",
+        map: "Factory",
+        description: "Classic Factory roof challenge.",
+        startTime: new Date(Date.now() - 30 * 60 * 1000), 
+        endTime: new Date(Date.now() + 30 * 60 * 1000),
+        prizePool: 200,
+        maxPlayers: 2,
+        status: "LIVE",
+      },
+      {
+        title: "BR Solo Warmup",
+        game: "Free Fire",
+        matchType: "1v1",
+        map: "Purgatory",
+        description: "Casual warmup match.",
+        startTime: new Date(Date.now() - 300 * 60 * 1000), 
+        endTime: new Date(Date.now() - 240 * 60 * 1000),
+        prizePool: 0,
+        maxPlayers: 48,
+        status: "COMPLETED",
+      }
+    ]);
+
+    console.log("✅ Database successfully seeded with Admin and Test Cases!");
+  } catch (error) {
+    console.error("❌ Seeding failed:", error);
+  } finally {
+    mongoose.connection.close();
+    process.exit();
+  }
+}
+
+seed();

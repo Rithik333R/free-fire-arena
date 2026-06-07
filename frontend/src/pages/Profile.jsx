@@ -1,139 +1,352 @@
+// frontend/src/pages/Profile.jsx
+
 import { useState, useEffect } from "react";
-import axios from "axios";
-import { useAuth } from "../context/AuthContext";
-import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import { getLeaderboard } from "../api/leaderboard.api";
+import { getRegisteredTournaments } from "../api/tournaments.api";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase B5 fix — TD-016 (partially resolved)
+//
+// Stats now sourced from leaderboard entry — same source as Leaderboard page.
+// Match history sourced from GET /api/tournaments/registered — no more
+// client-side filtering of all tournaments.
+//
+// Remaining Phase D work:
+//   - Replace dual API calls with a single GET /api/users/profile endpoint
+//     that returns { stats, recentMatches } in one round trip.
+//   - Add avatar field to User model.
+//   - Add Free Fire UID to User model at profile level.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const CATEGORY_LABELS = {
+  BATTLE_ROYALE: "Battle Royale",
+  CLASH_SQUAD: "Clash Squad",
+  LONE_WOLF: "Lone Wolf",
+};
+
+const STATUS_CONFIG = {
+  LIVE: {
+    label: "LIVE",
+    classes:
+      "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse",
+  },
+  UPCOMING: {
+    label: "UPCOMING",
+    classes: "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30",
+  },
+  AWAITING_RESULTS: {
+    label: "RESULTS PENDING",
+    classes: "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+  },
+  COMPLETED: {
+    label: "COMPLETED",
+    classes: "bg-white/10 text-white/50 border border-white/10",
+  },
+};
+
+function StatusBadge({ status }) {
+  const config = STATUS_CONFIG[status] ?? {
+    label: status,
+    classes: "bg-white/10 text-white/40 border border-white/10",
+  };
+  return (
+    <span
+      className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${config.classes}`}
+    >
+      {config.label}
+    </span>
+  );
+}
+
+function StatCard({ label, value, accent, sub }) {
+  return (
+    <div className="bg-[#121212] border border-white/5 rounded-2xl p-5 text-center">
+      <p
+        className={`font-black text-2xl mb-1 ${
+          accent ? "text-[#1DB954]" : "text-white"
+        }`}
+      >
+        {value}
+      </p>
+      <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">
+        {label}
+      </p>
+      {sub && (
+        <p className="text-white/20 text-[9px] mt-1 uppercase tracking-widest">
+          {sub}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function getInitials(name) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Profile() {
   const { user } = useAuth();
-  const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
-  const [history, setHistory] = useState([]);
+
+  const [leaderboardEntry, setLeaderboardEntry] = useState(null);
+  const [joinedTournaments, setJoinedTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const userId = user?._id ?? user?.id;
 
   useEffect(() => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+
     const fetchProfileData = async () => {
       try {
-        const token = localStorage.getItem("token");
-        
-        // 1. Fetch Global Stats for Summary
-        const leaderRes = await axios.get("http://localhost:5000/api/leaderboard");
-        const currentUserStats = leaderRes.data.find(p => p._id === user.id);
-        setStats(currentUserStats);
+        setLoading(true);
+        setError(null);
 
-        // 2. Fetch Detailed Tournament History
-        // This assumes your backend has a route to get tournaments by participant ID
-        const tournamentRes = await axios.get("http://localhost:5000/api/tournaments");
-        const myHistory = tournamentRes.data.filter(t => 
-          t.participants.some(p => p.user === user.id) && t.status === "COMPLETED"
+        // Parallel calls:
+        // 1. Leaderboard — for stats (points, kills, matches, prize)
+        // 2. Registered tournaments — for match history
+        //
+        // Both calls use the centralized API client.
+        // No getAllTournaments() — we no longer download all tournaments
+        // to filter client-side (Phase A/B fix).
+        const [leaderboard, registered] = await Promise.all([
+          getLeaderboard(),
+          getRegisteredTournaments(),
+        ]);
+
+        // Find this user's leaderboard entry by ObjectId.
+        const entry = leaderboard.find(
+          (p) =>
+            p._id === userId ||
+            p._id?.toString() === userId?.toString()
         );
-        setHistory(myHistory);
+        setLeaderboardEntry(entry ?? null);
 
+        // Match history comes directly from registered endpoint —
+        // no client-side filter needed.
+        setJoinedTournaments(registered);
       } catch (err) {
-        console.error("Profile fetch error", err);
+        console.error("Failed to fetch profile data:", err);
+        setError("Failed to load profile. Please try again.");
       } finally {
         setLoading(false);
       }
     };
-    if (user?.id) fetchProfileData();
-  }, [user]);
 
-  if (loading) return <div className="p-20 text-[#1DB954] font-black animate-pulse uppercase italic">Synchronizing Data...</div>;
+    fetchProfileData();
+  }, [userId]);
 
+  // ── Render: loading ──────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
+          <p className="text-white/30 text-xs font-black uppercase tracking-widest">
+            Loading profile...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: error ────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+        <div className="text-center">
+          <p className="text-red-400 text-sm font-black uppercase tracking-widest mb-6">
+            {error}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-white text-black font-black uppercase tracking-widest text-xs px-8 py-3 rounded-xl hover:bg-[#1DB954] transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Stats — from leaderboard entry (same source as Leaderboard page).
+  // Zeros for players with no completed linked results.
+  const totalPoints = leaderboardEntry?.totalPoints ?? 0;
+  const totalKills = leaderboardEntry?.totalKills ?? 0;
+  const totalMatches = leaderboardEntry?.totalMatches ?? 0;
+  const totalPrize = leaderboardEntry?.totalPrize ?? 0;
+  const displayIGN = leaderboardEntry?.ign ?? user?.username ?? "—";
+
+  // ── Render: main ─────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-12">
-      <div className="max-w-5xl mx-auto">
-        
-        {/* TOP NAV */}
-        <button onClick={() => navigate("/")} className="mb-8 text-[10px] font-black uppercase text-white/30 hover:text-[#1DB954] transition-colors tracking-widest">
-          ← Back to Arena
-        </button>
+    <div className="min-h-screen bg-black text-white p-6 md:p-10">
+      <div className="max-w-3xl mx-auto">
 
-        {/* PROFILE HEADER */}
-        <div className="flex flex-col md:flex-row items-center gap-10 mb-12 bg-[#121212] p-12 rounded-[3.5rem] border border-white/5 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-[#1DB954]/5 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-          
-          <div className="w-40 h-40 bg-[#1DB954] rounded-full flex items-center justify-center text-6xl font-black text-black italic shadow-[0_0_50px_rgba(29,185,84,0.3)]">
-            {stats?.ign?.charAt(0) || user?.username?.charAt(0)}
+        {/* Profile header */}
+        <div className="bg-[#121212] border border-white/5 rounded-2xl p-8 mb-6 flex items-center gap-6">
+          {/* Avatar — initials fallback until Phase D adds avatar field */}
+          <div className="w-20 h-20 rounded-full bg-[#1DB954]/20 border-2 border-[#1DB954]/30 flex items-center justify-center shrink-0">
+            <span className="text-2xl font-black text-[#1DB954]">
+              {getInitials(user?.username)}
+            </span>
           </div>
-          
-          <div className="text-center md:text-left z-10">
-            <h1 className="text-6xl font-black uppercase italic tracking-tighter leading-none mb-2">{stats?.ign || "RECRUIT"}</h1>
-            <p className="text-white/30 font-black text-xs uppercase tracking-[0.4em] mb-4">Official ID: {user?.username}</p>
-            <div className="flex flex-wrap justify-center md:justify-start gap-3">
-               <Badge text="VETERAN" />
-               <Badge text={`LEVEL ${stats?.totalMatches || 0}`} />
+
+          {/* Identity */}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-black uppercase tracking-tighter text-white truncate">
+              {user?.username ?? "Player"}
+            </h1>
+            <p className="text-white/30 text-xs mt-1 truncate">
+              {user?.email}
+            </p>
+            {displayIGN !== user?.username && (
+              <p className="text-[#1DB954] text-[11px] font-black uppercase tracking-widest mt-1">
+                IGN: {displayIGN}
+              </p>
+            )}
+            <span
+              className={`inline-block mt-2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                user?.role === "ADMIN"
+                  ? "bg-[#1DB954]/20 text-[#1DB954] border border-[#1DB954]/30"
+                  : "bg-white/5 text-white/40 border border-white/10"
+              }`}
+            >
+              {user?.role ?? "USER"}
+            </span>
+          </div>
+        </div>
+
+        {/* Stats grid — sourced from leaderboard (results[]) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+          <StatCard
+            label="Total Points"
+            value={totalPoints}
+            accent
+          />
+          <StatCard
+            label="Total Kills"
+            value={totalKills}
+          />
+          <StatCard
+            label="Matches"
+            value={totalMatches}
+            sub="with results"
+          />
+          <StatCard
+            label="Prize Earned"
+            value={totalPrize > 0 ? `₹${totalPrize.toLocaleString("en-IN")}` : "₹0"}
+          />
+        </div>
+
+        {/* No stats notice for new players */}
+        {!leaderboardEntry && joinedTournaments.length > 0 && (
+          <div className="bg-white/5 border border-white/10 rounded-xl px-5 py-4 mb-6">
+            <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">
+              Stats appear here once tournament results are published and linked to your account.
+            </p>
+          </div>
+        )}
+
+        {/* Tournament history */}
+        <div>
+          <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-4">
+            Tournament History ({joinedTournaments.length})
+          </h2>
+
+          {joinedTournaments.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center bg-[#121212] border border-white/5 rounded-2xl">
+              <span className="text-3xl mb-4">🎮</span>
+              <p className="text-white/30 text-sm font-black uppercase tracking-widest">
+                No tournaments joined yet
+              </p>
             </div>
-          </div>
-        </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {joinedTournaments.map((t) => {
+                // Find this user's participant record for this tournament.
+                const myParticipant = t.participants?.find(
+                  (p) =>
+                    p.user === userId ||
+                    p.user?._id === userId ||
+                    p.user?.toString() === userId?.toString()
+                );
 
-        {/* STATS GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <StatCard label="Total Points" value={stats?.totalPoints || 0} color="text-[#1DB954]" />
-          <StatCard label="Confirmed Kills" value={stats?.totalKills || 0} />
-          <StatCard label="Matches Played" value={stats?.totalMatches || 0} />
-        </div>
+                // Find this user's result in this tournament if published.
+                const myResult = t.results?.find(
+                  (r) =>
+                    r.user === userId ||
+                    r.user?.toString() === userId?.toString()
+                );
 
-        {/* BATTLE HISTORY TABLE */}
-        <div className="bg-[#121212] rounded-[2.5rem] border border-white/5 overflow-hidden">
-          <div className="p-8 border-b border-white/5">
-            <h2 className="text-xl font-black italic uppercase tracking-tighter">Battle History</h2>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-[10px] font-black uppercase text-white/20 tracking-widest bg-white/[0.02]">
-                  <th className="p-6">Tournament</th>
-                  <th className="p-6 text-center">Rank</th>
-                  <th className="p-6 text-center">Kills</th>
-                  <th className="p-6 text-right">Points Earned</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {history.length > 0 ? history.map((match) => {
-                  const myPerformance = match.participants.find(p => p.user === user.id);
-                  return (
-                    <tr key={match._id} className="hover:bg-white/[0.02] transition-colors group">
-                      <td className="p-6">
-                        <p className="font-bold text-sm group-hover:text-[#1DB954] transition-colors">{match.title}</p>
-                        <p className="text-[9px] font-black text-white/20 uppercase mt-1">{match.matchCategory}</p>
-                      </td>
-                      <td className="p-6 text-center font-black italic text-xl text-white/40">#{myPerformance?.rank}</td>
-                      <td className="p-6 text-center font-mono text-sm">{myPerformance?.kills}</td>
-                      <td className="p-6 text-right font-black text-[#1DB954] text-xl">
-                        {/* Logic: Rank 1 BR gets +20, else just kills */}
-                        {(match.matchCategory === "BATTLE_ROYALE" && myPerformance?.rank === 1) 
-                          ? myPerformance?.kills + 20 
-                          : myPerformance?.kills}
-                      </td>
-                    </tr>
-                  );
-                }) : (
-                  <tr>
-                    <td colSpan="4" className="p-12 text-center text-white/10 font-black uppercase text-xs tracking-widest">
-                      No combat records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                return (
+                  <div
+                    key={t._id}
+                    className="bg-[#121212] border border-white/5 rounded-xl px-5 py-4 flex items-center gap-4 hover:border-white/10 transition-all"
+                  >
+                    {/* Tournament info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-black text-sm truncate">
+                        {t.title}
+                      </p>
+                      <p className="text-white/30 text-[10px] mt-0.5">
+                        {CATEGORY_LABELS[t.matchCategory] ?? t.matchCategory}
+                        {t.startTime &&
+                          ` · ${new Date(t.startTime).toLocaleDateString(
+                            "en-IN",
+                            { dateStyle: "medium" }
+                          )}`}
+                      </p>
+                    </div>
+
+                    {/* Result if published and linked */}
+                    {myResult ? (
+                      <div className="text-right shrink-0 hidden sm:block">
+                        <p className="text-[#1DB954] text-[11px] font-black">
+                          {myResult.rank}
+                        </p>
+                        {myResult.kills !== null &&
+                          myResult.kills !== undefined && (
+                            <p className="text-white/30 text-[9px] uppercase tracking-widest">
+                              {myResult.kills} kills
+                            </p>
+                          )}
+                        {myResult.prize > 0 && (
+                          <p className="text-[#1DB954] text-[9px] font-black">
+                            ₹{myResult.prize.toLocaleString("en-IN")}
+                          </p>
+                        )}
+                      </div>
+                    ) : myParticipant?.ign ? (
+                      // Joined but no linked result yet.
+                      <div className="text-right shrink-0 hidden sm:block">
+                        <p className="text-white text-[11px] font-black">
+                          {myParticipant.ign}
+                        </p>
+                        <p className="text-white/30 text-[9px] uppercase tracking-widest">
+                          IGN
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <StatusBadge status={t.status} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
-}
-
-function StatCard({ label, value, color = "text-white" }) {
-  return (
-    <div className="bg-[#121212] p-8 rounded-[2rem] border border-white/5 text-center transition-transform hover:scale-105">
-      <p className="text-[10px] font-black uppercase text-white/20 tracking-[0.2em] mb-2">{label}</p>
-      <p className={`text-5xl font-black italic tracking-tighter ${color}`}>{value}</p>
-    </div>
-  );
-}
-
-function Badge({ text }) {
-  return <span className="bg-white/5 border border-white/10 px-4 py-1.5 rounded-full text-[9px] font-black tracking-widest text-white/60 uppercase">{text}</span>;
 }
