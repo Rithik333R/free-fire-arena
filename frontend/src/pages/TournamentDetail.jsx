@@ -5,12 +5,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { getTournamentById, joinTournament } from "../api/tournaments.api";
 
-// Reveal polling constants.
-// Within REVEAL_POLL_WINDOW_MS of start time, re-fetch every
-// REVEAL_POLL_INTERVAL_MS so credentials appear as soon as the
-// backend reveals them — no exact-second dependency.
-const REVEAL_POLL_WINDOW_MS = 20 * 60 * 1000;  // 20 minutes
-const REVEAL_POLL_INTERVAL_MS = 30 * 1000;      // 30 seconds
+const REVEAL_POLL_WINDOW_MS = 20 * 60 * 1000;
+const REVEAL_POLL_INTERVAL_MS = 30 * 1000;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -37,6 +33,10 @@ const STATUS_CONFIG = {
   COMPLETED: {
     label: "COMPLETED",
     classes: "bg-white/10 text-white/50 border border-white/10",
+  },
+  CANCELED: {
+    label: "CANCELED",
+    classes: "bg-red-900/20 text-red-600 border border-red-900/30",
   },
 };
 
@@ -71,10 +71,7 @@ function StatusBadge({ status }) {
 
 function CountdownDisplay({ startTime }) {
   const [countdown, setCountdown] = useState({
-    h: 0,
-    m: 0,
-    s: 0,
-    label: null,
+    h: 0, m: 0, s: 0, label: null,
   });
 
   useEffect(() => {
@@ -120,21 +117,7 @@ function CountdownDisplay({ startTime }) {
   );
 }
 
-/**
- * RoomCredentials — displays room access information.
- *
- * Props:
- *   credentialsRevealed: boolean — from backend, authoritative reveal state
- *   roomId: string | null
- *   roomPassword: string | null
- *
- * Three states:
- *   1. Not revealed — show locked panel with time notice
- *   2. Revealed but credentials not set — admin has not entered them yet
- *   3. Revealed and credentials available — show roomId and roomPassword
- */
 function RoomCredentials({ credentialsRevealed, roomId, roomPassword }) {
-  // State 1 — not yet in the reveal window.
   if (!credentialsRevealed) {
     return (
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
@@ -146,7 +129,6 @@ function RoomCredentials({ credentialsRevealed, roomId, roomPassword }) {
     );
   }
 
-  // State 2 — in reveal window but admin has not set credentials yet.
   if (!roomId) {
     return (
       <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-6 text-center">
@@ -158,7 +140,6 @@ function RoomCredentials({ credentialsRevealed, roomId, roomPassword }) {
     );
   }
 
-  // State 3 — credentials available.
   return (
     <div className="bg-[#1DB954]/5 border border-[#1DB954]/20 rounded-2xl p-6 flex flex-col gap-4">
       <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-widest">
@@ -235,6 +216,95 @@ function JoinForm({ onJoin, loading }) {
   );
 }
 
+// ── Canceled notice — standalone render ────────────────────────────────────
+
+function CanceledNotice({ tournament, onBack }) {
+  const categoryLabel =
+    CATEGORY_LABELS[tournament.matchCategory] ?? tournament.matchCategory;
+
+  return (
+    <div className="min-h-screen bg-black text-white p-6 md:p-10">
+      <div className="max-w-3xl mx-auto">
+
+        {/* Back button */}
+        <button
+          onClick={onBack}
+          className="group mb-8 flex items-center gap-2 text-white/40 hover:text-[#1DB954] transition-all font-black uppercase text-[10px] tracking-widest"
+        >
+          <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:border-[#1DB954]/50 transition-all">
+            ←
+          </div>
+          Back to Lobby
+        </button>
+
+        {/* Banner */}
+        {tournament.banner && (
+          <div className="h-48 rounded-2xl overflow-hidden mb-6 opacity-30">
+            <img
+              src={tournament.banner}
+              alt={tournament.title}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 mb-8">
+          <div className="flex-1 min-w-0">
+            <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.4em] mb-1">
+              {categoryLabel}
+            </p>
+            <h1 className="text-3xl font-black italic uppercase tracking-tighter text-white/50 line-through">
+              {tournament.title}
+            </h1>
+          </div>
+          <StatusBadge status="CANCELED" />
+        </div>
+
+        {/* Canceled notice */}
+        <div className="bg-red-900/10 border border-red-900/30 rounded-2xl p-8 text-center">
+          <div className="text-4xl mb-4">✕</div>
+          <h2 className="text-red-500 font-black uppercase tracking-widest text-lg mb-3">
+            Tournament Canceled
+          </h2>
+          <p className="text-white/30 text-sm max-w-sm mx-auto">
+            This tournament has been canceled by the admin. If you had
+            registered, your slot has been released.
+          </p>
+        </div>
+
+        {/* Basic info — still useful for reference */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6 opacity-40">
+          {[
+            {
+              label: "Mode",
+              value: categoryLabel,
+            },
+            {
+              label: "Prize Pool",
+              value: `₹${tournament.prizePool?.toLocaleString("en-IN") ?? 0}`,
+            },
+            {
+              label: "Map",
+              value: tournament.map ?? "—",
+            },
+          ].map(({ label, value }) => (
+            <div
+              key={label}
+              className="bg-[#121212] border border-white/5 rounded-xl p-4 text-center"
+            >
+              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                {label}
+              </p>
+              <p className="text-white text-sm font-black">{value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function TournamentDetail() {
@@ -265,7 +335,6 @@ export default function TournamentDetail() {
     }
   }, [id]);
 
-  // Initial fetch.
   useEffect(() => {
     const initialFetch = async () => {
       setLoading(true);
@@ -276,10 +345,9 @@ export default function TournamentDetail() {
   }, [fetchTournament]);
 
   // Proximity-based credential reveal polling.
-  // Polls every 30s when registered and within 20 minutes of start.
-  // Reads credentialsRevealed from each response — no string comparison.
   useEffect(() => {
     if (!tournament) return;
+    if (tournament.status === "CANCELED") return;
 
     const isRegistered = tournament.participants?.some(
       (p) =>
@@ -352,7 +420,19 @@ export default function TournamentDetail() {
 
   if (!tournament) return null;
 
-  // Derived state.
+  // ── Render: canceled ───────────────────────────────────────────────
+  // Early return — canceled tournaments show a dedicated notice.
+  // No join form, countdown, credentials, or results button.
+  if (tournament.status === "CANCELED") {
+    return (
+      <CanceledNotice
+        tournament={tournament}
+        onBack={() => navigate(-1)}
+      />
+    );
+  }
+
+  // Derived state — only reached for non-canceled tournaments.
   const isRegistered = tournament.participants?.some(
     (p) =>
       p.user === userId ||
@@ -361,8 +441,6 @@ export default function TournamentDetail() {
   );
   const isFull =
     (tournament.participants?.length ?? 0) >= tournament.maxPlayers;
-  const canJoin =
-    tournament.status === "UPCOMING" && !isRegistered && !isFull;
   const categoryLabel =
     CATEGORY_LABELS[tournament.matchCategory] ?? tournament.matchCategory;
 
@@ -450,7 +528,7 @@ export default function TournamentDetail() {
           ))}
         </div>
 
-        {/* Countdown — only for UPCOMING matches */}
+        {/* Countdown — UPCOMING only */}
         {tournament.status === "UPCOMING" && tournament.startTime && (
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6 text-center">
             <p className="text-white/30 text-[10px] font-black uppercase tracking-widest mb-3">
@@ -460,13 +538,12 @@ export default function TournamentDetail() {
           </div>
         )}
 
-        {/* Room credentials — only for registered users */}
+        {/* Room credentials — registered users only */}
         {isRegistered && (
           <div className="mb-6">
             <p className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">
               Room Access
             </p>
-            {/* B3 fix: reads credentialsRevealed boolean — no string comparison */}
             <RoomCredentials
               credentialsRevealed={tournament.credentialsRevealed ?? false}
               roomId={tournament.roomId ?? null}
@@ -475,7 +552,7 @@ export default function TournamentDetail() {
           </div>
         )}
 
-        {/* Join section */}
+        {/* Join section — UPCOMING only */}
         {tournament.status === "UPCOMING" && (
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6">
             {isRegistered || joinSuccess ? (
@@ -545,7 +622,7 @@ export default function TournamentDetail() {
           </div>
         )}
 
-        {/* Results button for completed matches */}
+        {/* Results button */}
         {(tournament.status === "COMPLETED" ||
           tournament.status === "AWAITING_RESULTS") && (
           <button

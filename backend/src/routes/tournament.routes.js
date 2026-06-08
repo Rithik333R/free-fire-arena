@@ -104,9 +104,15 @@ function validateCredentialsBody(body) {
 
 // ── Public routes ──────────────────────────────────────────────────────────
 
+// GET /api/tournaments
+// Public: returns all non-canceled tournaments sorted by start time.
+// CANCELED tournaments are excluded — they are admin-only and should
+// never appear in the player lobby.
 router.get("/", async (req, res) => {
   try {
-    const tournaments = await Tournament.find().sort({ startTime: 1 });
+    const tournaments = await Tournament.find({
+      status: { $ne: "CANCELED" },
+    }).sort({ startTime: 1 });
     res.json(tournaments);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch tournaments." });
@@ -115,6 +121,10 @@ router.get("/", async (req, res) => {
 
 // ── Authenticated player routes ────────────────────────────────────────────
 
+// GET /api/tournaments/registered
+// Secure: returns only tournaments the logged-in user has joined.
+// Includes CANCELED — player should see if their tournament was canceled.
+// NOTE: Declared before /:id to prevent "registered" matching as an ID.
 router.get("/registered", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -127,6 +137,16 @@ router.get("/registered", authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/tournaments/:id
+// Secure: returns full tournament detail with structured credential reveal.
+//
+// Response shape:
+// {
+//   ...tournamentFields,
+//   credentialsRevealed: boolean,
+//   roomId?: string,
+//   roomPassword?: string,
+// }
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -167,6 +187,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/tournaments/:id/join
+// Secure: allows an authenticated player to join an upcoming tournament.
 router.post("/:id/join", authMiddleware, async (req, res) => {
   try {
     const joinError = validateJoinBody(req.body);
@@ -217,6 +239,8 @@ router.post("/:id/join", authMiddleware, async (req, res) => {
 
 // ── Admin routes ───────────────────────────────────────────────────────────
 
+// POST /api/tournaments
+// Admin: creates a new tournament.
 router.post("/", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const validationError = validateTournamentBody(req.body);
@@ -233,6 +257,8 @@ router.post("/", authMiddleware, adminMiddleware, async (req, res) => {
   }
 });
 
+// PUT /api/tournaments/:id/credentials
+// Admin: injects room ID and password for a tournament.
 router.put(
   "/:id/credentials",
   authMiddleware,
@@ -274,11 +300,8 @@ router.put(
 // Admin: publishes final results and moves tournament to COMPLETED.
 //
 // State machine:
-//   AWAITING_RESULTS → COMPLETED   (normal post-match flow)
-//   COMPLETED → COMPLETED          (admin correcting published results)
-//
-// Each result row now persists user ObjectId and uid when provided
-// (B4.3 fix — previously these fields were silently discarded).
+//   AWAITING_RESULTS → COMPLETED
+//   COMPLETED → COMPLETED (result correction)
 router.put(
   "/:id/results",
   authMiddleware,
@@ -314,9 +337,6 @@ router.put(
         });
       }
 
-      // Map result rows — persist user ref and uid when present.
-      // user defaults to null (not empty string) to avoid ObjectId cast errors.
-      // uid defaults to null for manual entry slots.
       tournament.results = results.map((r) => ({
         rank: r.rank,
         user: r.user ?? null,

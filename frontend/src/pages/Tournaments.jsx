@@ -6,6 +6,9 @@ import { getAllTournaments } from "../api/tournaments.api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// CANCELED is intentionally excluded from player-facing filter tabs.
+// The backend already excludes CANCELED from GET /api/tournaments.
+// This list only contains statuses players should be able to filter by.
 const STATUS_FILTERS = ["ALL", "LIVE", "UPCOMING", "AWAITING_RESULTS", "COMPLETED"];
 
 const STATUS_CONFIG = {
@@ -26,9 +29,14 @@ const STATUS_CONFIG = {
     label: "COMPLETED",
     classes: "bg-white/10 text-white/50 border border-white/10",
   },
+  // Defensive entry — CANCELED should never appear in the player lobby
+  // because the backend excludes it. This badge is a safety fallback only.
+  CANCELED: {
+    label: "CANCELED",
+    classes: "bg-red-900/20 text-red-600 border border-red-900/30",
+  },
 };
 
-// Human-readable filter tab labels.
 const FILTER_LABELS = {
   ALL: "All",
   LIVE: "Live",
@@ -145,7 +153,9 @@ function TournamentCard({ tournament }) {
 
         {/* CTA */}
         <button
-          onClick={() => navigate(`/tournaments/view/${tournament._id}`)}
+          onClick={() =>
+            navigate(`/tournaments/view/${tournament._id}`)
+          }
           className="w-full mt-auto bg-white/5 hover:bg-[#1DB954] hover:text-black border border-white/10 hover:border-transparent text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-xl transition-all"
         >
           View Details
@@ -168,7 +178,9 @@ function FilterTab({ label, active, onClick, count }) {
       {label}
       {count !== undefined && (
         <span
-          className={`ml-2 ${active ? "text-black/60" : "text-white/20"}`}
+          className={`ml-2 ${
+            active ? "text-black/60" : "text-white/20"
+          }`}
         >
           {count}
         </span>
@@ -203,7 +215,7 @@ export default function Tournaments() {
     fetchTournaments();
   }, []);
 
-  // Client-side filter.
+  // Client-side filter — backend already excludes CANCELED.
   const filtered =
     activeFilter === "ALL"
       ? tournaments
@@ -283,7 +295,10 @@ export default function Tournaments() {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <p className="text-white/30 text-sm font-black uppercase tracking-widest">
-              No {activeFilter === "ALL" ? "" : FILTER_LABELS[activeFilter].toLowerCase()}{" "}
+              No{" "}
+              {activeFilter === "ALL"
+                ? ""
+                : FILTER_LABELS[activeFilter].toLowerCase()}{" "}
               tournaments found.
             </p>
           </div>

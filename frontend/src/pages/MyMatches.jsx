@@ -25,6 +25,10 @@ const STATUS_CONFIG = {
     label: "COMPLETED",
     classes: "bg-white/10 text-white/50 border border-white/10",
   },
+  CANCELED: {
+    label: "CANCELED",
+    classes: "bg-red-900/20 text-red-600 border border-red-900/30",
+  },
 };
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -60,8 +64,16 @@ function MatchCard({ match, userId }) {
   const hasResults =
     Array.isArray(match.results) && match.results.length > 0;
 
+  const isCanceled = match.status === "CANCELED";
+
   return (
-    <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-4 hover:border-white/10 transition-all">
+    <div
+      className={`bg-[#121212] border rounded-2xl p-6 flex flex-col gap-4 transition-all ${
+        isCanceled
+          ? "border-red-900/20 opacity-60"
+          : "border-white/5 hover:border-white/10"
+      }`}
+    >
       {/* Header row */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -103,7 +115,7 @@ function MatchCard({ match, userId }) {
         </div>
       </div>
 
-      {/* Awaiting results notice */}
+      {/* Status-specific notices */}
       {match.status === "AWAITING_RESULTS" && (
         <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl px-4 py-3">
           <p className="text-blue-400 text-[10px] font-black uppercase tracking-widest">
@@ -112,25 +124,35 @@ function MatchCard({ match, userId }) {
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="flex gap-3 pt-1">
-        <button
-          onClick={() => navigate(`/tournaments/view/${match._id}`)}
-          className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest py-2.5 rounded-xl transition-all"
-        >
-          Match Detail
-        </button>
-        {match.status === "COMPLETED" && hasResults && (
+      {isCanceled && (
+        <div className="bg-red-900/10 border border-red-900/30 rounded-xl px-4 py-3">
+          <p className="text-red-500/80 text-[10px] font-black uppercase tracking-widest">
+            ✕ This tournament was canceled by the admin
+          </p>
+        </div>
+      )}
+
+      {/* Action buttons — hidden for canceled tournaments */}
+      {!isCanceled && (
+        <div className="flex gap-3 pt-1">
           <button
-            onClick={() =>
-              navigate(`/tournaments/${match._id}/results`)
-            }
-            className="flex-1 bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/20 text-[#1DB954] text-[10px] font-black uppercase tracking-widest py-2.5 rounded-xl transition-all"
+            onClick={() => navigate(`/tournaments/view/${match._id}`)}
+            className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest py-2.5 rounded-xl transition-all"
           >
-            View Results
+            Match Detail
           </button>
-        )}
-      </div>
+          {match.status === "COMPLETED" && hasResults && (
+            <button
+              onClick={() =>
+                navigate(`/tournaments/${match._id}/results`)
+              }
+              className="flex-1 bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/20 text-[#1DB954] text-[10px] font-black uppercase tracking-widest py-2.5 rounded-xl transition-all"
+            >
+              View Results
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
