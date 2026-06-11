@@ -3,7 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import { getTournamentById, joinTournament } from "../api/tournaments.api";
+import {
+  getTournamentById,
+  getTournamentSlots,
+  joinTournament,
+} from "../api/tournaments.api";
 
 const REVEAL_POLL_WINDOW_MS = 20 * 60 * 1000;
 const REVEAL_POLL_INTERVAL_MS = 30 * 1000;
@@ -51,6 +55,13 @@ function formatCountdown(ms) {
 
 function pad(n) {
   return String(n).padStart(2, "0");
+}
+
+function getTeamSize(matchType) {
+  if (!matchType) return null;
+  const match = matchType.match(/^(\d+)v\d+$/i);
+  if (!match) return null;
+  return parseInt(match[1], 10);
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -167,18 +178,357 @@ function RoomCredentials({ credentialsRevealed, roomId, roomPassword }) {
   );
 }
 
-function JoinForm({ onJoin, loading }) {
+// ── Payout Preview ─────────────────────────────────────────────────────────
+
+/**
+ * PayoutPreview — informational card showing reward structure.
+ * Displayed on the tournament detail page below the meta grid.
+ * Does not affect any calculation — display only.
+ */
+function PayoutPreview({ tournament }) {
+  const {
+    matchCategory,
+    matchType,
+    prizePool,
+    winnerPrize,
+    perKillReward,
+    entryFee,
+  } = tournament;
+
+  const hasBRRewards =
+    matchCategory === "BATTLE_ROYALE" &&
+    (winnerPrize > 0 || perKillReward > 0);
+
+  const teamSize =
+    matchCategory === "CLASH_SQUAD" ? getTeamSize(matchType) : null;
+  const prizePerPlayer =
+    teamSize && prizePool ? Math.floor(prizePool / teamSize) : null;
+
+  const exampleKills = 5;
+  const exampleWinTotal = hasBRRewards
+    ? (winnerPrize ?? 0) + exampleKills * (perKillReward ?? 0)
+    : null;
+  const exampleKillOnly = hasBRRewards
+    ? 3 * (perKillReward ?? 0)
+    : null;
+
+  return (
+    <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6">
+      <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-4">
+        Payout Structure
+      </h2>
+
+      {/* ── Battle Royale ──────────────────────────────────────────── */}
+      {matchCategory === "BATTLE_ROYALE" && (
+        <div className="flex flex-col gap-3">
+          {hasBRRewards ? (
+            <>
+              {/* Reward breakdown */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-black/40 rounded-xl p-3">
+                  <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                    Winner Prize
+                  </p>
+                  <p className="text-[#1DB954] font-black text-base">
+                    ₹{(winnerPrize ?? 0).toLocaleString("en-IN")}
+                  </p>
+                  <p className="text-white/20 text-[9px] mt-0.5">
+                    Placement #1 only
+                  </p>
+                </div>
+                <div className="bg-black/40 rounded-xl p-3">
+                  <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                    Per Kill
+                  </p>
+                  <p className="text-[#1DB954] font-black text-base">
+                    ₹{(perKillReward ?? 0).toLocaleString("en-IN")}
+                  </p>
+                  <p className="text-white/20 text-[9px] mt-0.5">
+                    All players
+                  </p>
+                </div>
+              </div>
+
+              {/* Entry fee */}
+              {entryFee > 0 && (
+                <div className="flex items-center justify-between text-[11px] border-t border-white/5 pt-3">
+                  <span className="text-white/30 font-black uppercase tracking-widest text-[10px]">
+                    Entry Fee
+                  </span>
+                  <span className="text-white font-black">
+                    ₹{entryFee.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              )}
+
+              {/* Examples */}
+              <div className="bg-black/20 rounded-xl p-3 flex flex-col gap-1.5">
+                <p className="text-white/20 text-[9px] font-black uppercase tracking-widest mb-1">
+                  Examples
+                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/40 text-[11px]">
+                    Win + {exampleKills} kills
+                  </span>
+                  <span className="text-[#1DB954] text-[11px] font-black">
+                    ₹{exampleWinTotal?.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/40 text-[11px]">
+                    3 kills only
+                  </span>
+                  <span className="text-[#1DB954] text-[11px] font-black">
+                    ₹{exampleKillOnly?.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/40 text-[11px]">
+                    0 kills
+                  </span>
+                  <span className="text-white/20 text-[11px] font-black">
+                    ₹0
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : (
+            // Pre-D+ BR tournament — no reward fields configured.
+            <div className="flex items-center justify-between">
+              <span className="text-white/30 text-[11px] font-black uppercase tracking-widest">
+                Prize Pool
+              </span>
+              <span className="text-[#1DB954] font-black text-base">
+                ₹{prizePool?.toLocaleString("en-IN")}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Clash Squad ────────────────────────────────────────────── */}
+      {matchCategory === "CLASH_SQUAD" && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-black/40 rounded-xl p-3">
+              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                Prize Pool
+              </p>
+              <p className="text-white font-black text-base">
+                ₹{prizePool?.toLocaleString("en-IN")}
+              </p>
+            </div>
+            <div className="bg-black/40 rounded-xl p-3">
+              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                Per Winner
+              </p>
+              <p className="text-[#1DB954] font-black text-base">
+                {prizePerPlayer
+                  ? `₹${prizePerPlayer.toLocaleString("en-IN")}`
+                  : "—"}
+              </p>
+              {teamSize && (
+                <p className="text-white/20 text-[9px] mt-0.5">
+                  Split {teamSize} ways ({matchType})
+                </p>
+              )}
+            </div>
+          </div>
+
+          {entryFee > 0 && (
+            <div className="flex items-center justify-between text-[11px] border-t border-white/5 pt-3">
+              <span className="text-white/30 font-black uppercase tracking-widest text-[10px]">
+                Entry Fee
+              </span>
+              <span className="text-white font-black">
+                ₹{entryFee.toLocaleString("en-IN")}
+              </span>
+            </div>
+          )}
+
+          <div className="bg-black/20 rounded-xl px-3 py-2.5">
+            <p className="text-white/30 text-[10px]">
+              Winning team shares the full prize pool equally.
+              Losing team receives nothing.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lone Wolf ──────────────────────────────────────────────── */}
+      {matchCategory === "LONE_WOLF" && (
+        <div className="flex flex-col gap-3">
+          <div className="bg-black/40 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                Winner Takes All
+              </p>
+              <p className="text-[#1DB954] font-black text-xl">
+                ₹{prizePool?.toLocaleString("en-IN")}
+              </p>
+            </div>
+            <span className="text-3xl">🏆</span>
+          </div>
+
+          {entryFee > 0 && (
+            <div className="flex items-center justify-between text-[11px] border-t border-white/5 pt-3">
+              <span className="text-white/30 font-black uppercase tracking-widest text-[10px]">
+                Entry Fee
+              </span>
+              <span className="text-white font-black">
+                ₹{entryFee.toLocaleString("en-IN")}
+              </span>
+            </div>
+          )}
+
+          <div className="bg-black/20 rounded-xl px-3 py-2.5">
+            <p className="text-white/30 text-[10px]">
+              1v1 format. The winner receives the full prize pool.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Slot Grid ──────────────────────────────────────────────────────────────
+
+function SlotCell({ slot, isSelected, isMine, onSelect }) {
+  const { slotNumber, occupied } = slot;
+
+  if (isMine) {
+    return (
+      <div className="relative flex flex-col items-center justify-center rounded-xl border-2 border-[#1DB954] bg-[#1DB954]/10 p-2 min-h-[56px] cursor-default">
+        <span className="text-[#1DB954] font-black text-xs">
+          {slotNumber}
+        </span>
+        <span className="text-[#1DB954]/70 text-[8px] font-black uppercase tracking-widest">
+          Yours
+        </span>
+      </div>
+    );
+  }
+
+  if (occupied) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-white/5 bg-white/5 p-2 min-h-[56px] cursor-not-allowed opacity-40">
+        <span className="text-white/30 font-black text-xs">
+          {slotNumber}
+        </span>
+        <span className="text-white/20 text-[8px]">🔒</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(slotNumber)}
+      className={`flex flex-col items-center justify-center rounded-xl border transition-all p-2 min-h-[56px] ${
+        isSelected
+          ? "border-[#1DB954] bg-[#1DB954]/20 text-[#1DB954]"
+          : "border-white/10 bg-black/40 text-white/50 hover:border-[#1DB954]/50 hover:text-white hover:bg-[#1DB954]/5"
+      }`}
+    >
+      <span className="font-black text-xs">{slotNumber}</span>
+      {isSelected && (
+        <span className="text-[8px] font-black uppercase tracking-widest">
+          ✓
+        </span>
+      )}
+    </button>
+  );
+}
+
+function SlotGrid({ slotMap, matchCategory, selectedSlot, onSelectSlot }) {
+  const { slots, mySlot, availableCount, totalSlots } = slotMap;
+
+  const team1Slots = slots.filter((s) => s.teamNumber === 1);
+  const team2Slots = slots.filter((s) => s.teamNumber === 2);
+  const soloSlots = slots.filter((s) => s.teamNumber === null);
+
+  const renderCell = (slot) => (
+    <SlotCell
+      key={slot.slotNumber}
+      slot={slot}
+      isSelected={selectedSlot === slot.slotNumber}
+      isMine={mySlot === slot.slotNumber}
+      onSelect={onSelectSlot}
+    />
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">
+          Select Your Slot
+        </p>
+        <p className="text-white/30 text-[10px]">
+          {availableCount} / {totalSlots} available
+        </p>
+      </div>
+
+      {matchCategory === "CLASH_SQUAD" && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-[#1DB954] text-[9px] font-black uppercase tracking-widest text-center">
+              Team 1
+            </p>
+            <div className="flex flex-col gap-2">
+              {team1Slots.map((slot) => renderCell(slot))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-blue-400 text-[9px] font-black uppercase tracking-widest text-center">
+              Team 2
+            </p>
+            <div className="flex flex-col gap-2">
+              {team2Slots.map((slot) => renderCell(slot))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {matchCategory === "BATTLE_ROYALE" && (
+        <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
+          {soloSlots.map((slot) => renderCell(slot))}
+        </div>
+      )}
+
+      {matchCategory === "LONE_WOLF" && (
+        <div className="grid grid-cols-2 gap-4">
+          {soloSlots.map((slot) => renderCell(slot))}
+        </div>
+      )}
+
+      {selectedSlot && (
+        <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-widest text-center">
+          Slot {selectedSlot} selected — fill in your details below
+        </p>
+      )}
+    </div>
+  );
+}
+
+function JoinForm({ onJoin, loading, selectedSlot }) {
   const [ign, setIgn] = useState("");
   const [uid, setUid] = useState("");
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!ign.trim() || !uid.trim()) return;
-    onJoin({ ign: ign.trim(), uid: uid.trim() });
+    onJoin({ ign: ign.trim(), uid: uid.trim(), slotNumber: selectedSlot });
   };
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div className="bg-[#1DB954]/5 border border-[#1DB954]/20 rounded-xl px-4 py-3">
+        <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-widest">
+          Booking Slot #{selectedSlot}
+        </p>
+      </div>
+
       <div>
         <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
           In-Game Name (IGN)
@@ -192,6 +542,7 @@ function JoinForm({ onJoin, loading }) {
           className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
         />
       </div>
+
       <div>
         <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
           Free Fire UID
@@ -205,18 +556,17 @@ function JoinForm({ onJoin, loading }) {
           className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
         />
       </div>
+
       <button
         type="submit"
         disabled={loading}
-        className="w-full bg-[#1DB954] text-black font-black uppercase tracking-widest text-xs py-4 rounded-xl hover:bg-white transition-all disabled:opacity-50 mt-2"
+        className="w-full bg-[#1DB954] text-black font-black uppercase tracking-widest text-xs py-4 rounded-xl hover:bg-white transition-all disabled:opacity-50"
       >
-        {loading ? "Registering..." : "Join Tournament"}
+        {loading ? "Registering..." : `Confirm Slot #${selectedSlot}`}
       </button>
     </form>
   );
 }
-
-// ── Canceled notice — standalone render ────────────────────────────────────
 
 function CanceledNotice({ tournament, onBack }) {
   const categoryLabel =
@@ -225,8 +575,6 @@ function CanceledNotice({ tournament, onBack }) {
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto">
-
-        {/* Back button */}
         <button
           onClick={onBack}
           className="group mb-8 flex items-center gap-2 text-white/40 hover:text-[#1DB954] transition-all font-black uppercase text-[10px] tracking-widest"
@@ -237,7 +585,6 @@ function CanceledNotice({ tournament, onBack }) {
           Back to Lobby
         </button>
 
-        {/* Banner */}
         {tournament.banner && (
           <div className="h-48 rounded-2xl overflow-hidden mb-6 opacity-30">
             <img
@@ -248,7 +595,6 @@ function CanceledNotice({ tournament, onBack }) {
           </div>
         )}
 
-        {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-8">
           <div className="flex-1 min-w-0">
             <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.4em] mb-1">
@@ -261,7 +607,6 @@ function CanceledNotice({ tournament, onBack }) {
           <StatusBadge status="CANCELED" />
         </div>
 
-        {/* Canceled notice */}
         <div className="bg-red-900/10 border border-red-900/30 rounded-2xl p-8 text-center">
           <div className="text-4xl mb-4">✕</div>
           <h2 className="text-red-500 font-black uppercase tracking-widest text-lg mb-3">
@@ -271,34 +616,6 @@ function CanceledNotice({ tournament, onBack }) {
             This tournament has been canceled by the admin. If you had
             registered, your slot has been released.
           </p>
-        </div>
-
-        {/* Basic info — still useful for reference */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6 opacity-40">
-          {[
-            {
-              label: "Mode",
-              value: categoryLabel,
-            },
-            {
-              label: "Prize Pool",
-              value: `₹${tournament.prizePool?.toLocaleString("en-IN") ?? 0}`,
-            },
-            {
-              label: "Map",
-              value: tournament.map ?? "—",
-            },
-          ].map(({ label, value }) => (
-            <div
-              key={label}
-              className="bg-[#121212] border border-white/5 rounded-xl p-4 text-center"
-            >
-              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
-                {label}
-              </p>
-              <p className="text-white text-sm font-black">{value}</p>
-            </div>
-          ))}
         </div>
       </div>
     </div>
@@ -313,6 +630,9 @@ export default function TournamentDetail() {
   const { user } = useAuth();
 
   const [tournament, setTournament] = useState(null);
+  const [slotMap, setSlotMap] = useState(null);
+  const [slotLoading, setSlotLoading] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [joinLoading, setJoinLoading] = useState(false);
@@ -320,8 +640,6 @@ export default function TournamentDetail() {
   const [joinSuccess, setJoinSuccess] = useState(false);
 
   const userId = user?._id ?? user?.id;
-
-  // ── Fetch ──────────────────────────────────────────────────────────
 
   const fetchTournament = useCallback(async () => {
     if (!id) return;
@@ -335,16 +653,28 @@ export default function TournamentDetail() {
     }
   }, [id]);
 
+  const fetchSlots = useCallback(async () => {
+    if (!id) return;
+    try {
+      setSlotLoading(true);
+      const data = await getTournamentSlots(id);
+      setSlotMap(data);
+    } catch (err) {
+      console.error("Failed to fetch slot map:", err);
+    } finally {
+      setSlotLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     const initialFetch = async () => {
       setLoading(true);
-      await fetchTournament();
+      await Promise.all([fetchTournament(), fetchSlots()]);
       setLoading(false);
     };
     initialFetch();
-  }, [fetchTournament]);
+  }, [fetchTournament, fetchSlots]);
 
-  // Proximity-based credential reveal polling.
   useEffect(() => {
     if (!tournament) return;
     if (tournament.status === "CANCELED") return;
@@ -367,15 +697,14 @@ export default function TournamentDetail() {
     return () => clearInterval(pollId);
   }, [tournament, userId, fetchTournament]);
 
-  // ── Join ───────────────────────────────────────────────────────────
-
-  const handleJoin = async ({ ign, uid }) => {
+  const handleJoin = async ({ ign, uid, slotNumber }) => {
     setJoinLoading(true);
     setJoinError(null);
     try {
-      await joinTournament(id, { ign, uid });
+      await joinTournament(id, { ign, uid, slotNumber });
       setJoinSuccess(true);
-      await fetchTournament();
+      setSelectedSlot(null);
+      await Promise.all([fetchTournament(), fetchSlots()]);
     } catch (err) {
       const message =
         err.response?.data?.message ?? "Failed to join. Please try again.";
@@ -385,7 +714,6 @@ export default function TournamentDetail() {
     }
   };
 
-  // ── Render: loading ────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -399,7 +727,6 @@ export default function TournamentDetail() {
     );
   }
 
-  // ── Render: error ──────────────────────────────────────────────────
   if (error) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-6">
@@ -420,9 +747,6 @@ export default function TournamentDetail() {
 
   if (!tournament) return null;
 
-  // ── Render: canceled ───────────────────────────────────────────────
-  // Early return — canceled tournaments show a dedicated notice.
-  // No join form, countdown, credentials, or results button.
   if (tournament.status === "CANCELED") {
     return (
       <CanceledNotice
@@ -432,7 +756,6 @@ export default function TournamentDetail() {
     );
   }
 
-  // Derived state — only reached for non-canceled tournaments.
   const isRegistered = tournament.participants?.some(
     (p) =>
       p.user === userId ||
@@ -443,8 +766,8 @@ export default function TournamentDetail() {
     (tournament.participants?.length ?? 0) >= tournament.maxPlayers;
   const categoryLabel =
     CATEGORY_LABELS[tournament.matchCategory] ?? tournament.matchCategory;
+  const hasSlotSystem = slotMap && slotMap.totalSlots > 0;
 
-  // ── Render: main ───────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto">
@@ -489,7 +812,9 @@ export default function TournamentDetail() {
           {[
             {
               label: "Prize Pool",
-              value: `₹${tournament.prizePool?.toLocaleString("en-IN") ?? 0}`,
+              value: `₹${
+                tournament.prizePool?.toLocaleString("en-IN") ?? 0
+              }`,
               accent: true,
             },
             {
@@ -505,10 +830,7 @@ export default function TournamentDetail() {
                 tournament.maxPlayers
               }`,
             },
-            {
-              label: "Map",
-              value: tournament.map ?? "—",
-            },
+            { label: "Map", value: tournament.map ?? "—" },
           ].map(({ label, value, accent }) => (
             <div
               key={label}
@@ -527,6 +849,9 @@ export default function TournamentDetail() {
             </div>
           ))}
         </div>
+
+        {/* Payout preview — shown for all active tournaments */}
+        <PayoutPreview tournament={tournament} />
 
         {/* Countdown — UPCOMING only */}
         {tournament.status === "UPCOMING" && tournament.startTime && (
@@ -552,7 +877,7 @@ export default function TournamentDetail() {
           </div>
         )}
 
-        {/* Join section — UPCOMING only */}
+        {/* Registration section */}
         {tournament.status === "UPCOMING" && (
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 mb-6">
             {isRegistered || joinSuccess ? (
@@ -561,7 +886,12 @@ export default function TournamentDetail() {
                 <p className="text-[#1DB954] font-black uppercase tracking-widest text-sm">
                   You are registered
                 </p>
-                <p className="text-white/30 text-xs mt-2">
+                {slotMap?.mySlot && (
+                  <p className="text-white/30 text-xs mt-2">
+                    Your slot: #{slotMap.mySlot}
+                  </p>
+                )}
+                <p className="text-white/30 text-xs mt-1">
                   Room credentials appear here 15 minutes before start.
                 </p>
               </div>
@@ -577,12 +907,43 @@ export default function TournamentDetail() {
                 <h2 className="text-white font-black uppercase tracking-tight text-base mb-5">
                   Register for this Match
                 </h2>
+
                 {joinError && (
                   <p className="text-red-400 text-[11px] font-black uppercase tracking-widest mb-4">
                     {joinError}
                   </p>
                 )}
-                <JoinForm onJoin={handleJoin} loading={joinLoading} />
+
+                {hasSlotSystem && !slotLoading && (
+                  <div className="mb-6">
+                    <SlotGrid
+                      slotMap={slotMap}
+                      matchCategory={tournament.matchCategory}
+                      selectedSlot={selectedSlot}
+                      onSelectSlot={setSelectedSlot}
+                    />
+                  </div>
+                )}
+
+                {slotLoading && (
+                  <div className="flex items-center justify-center py-8 mb-4">
+                    <div className="w-6 h-6 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
+
+                {(selectedSlot || !hasSlotSystem) && (
+                  <JoinForm
+                    onJoin={handleJoin}
+                    loading={joinLoading}
+                    selectedSlot={selectedSlot}
+                  />
+                )}
+
+                {hasSlotSystem && !selectedSlot && !slotLoading && (
+                  <p className="text-white/20 text-[10px] font-black uppercase tracking-widest text-center mt-4">
+                    Select a slot above to continue
+                  </p>
+                )}
               </>
             )}
           </div>

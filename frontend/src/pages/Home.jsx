@@ -1,30 +1,69 @@
 // frontend/src/pages/Home.jsx
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
+import { getUserProfile } from "../api/user.api";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PHASE D NOTE — TD-016 (placeholder stats)
-// The stats below are placeholder values. Real per-user stats require:
-//   GET /api/users/profile
-// Scheduled for Phase D. Do not add client-side stat computation here.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const PLACEHOLDER_STATS = [
-  { label: "Matches Played", value: "—" },
-  { label: "Total Kills", value: "—" },
-  { label: "Win Rate", value: "—" },
-];
-
-const QUICK_LINKS = [
-  { label: "My Matches", path: "/my-matches", icon: "🎮" },
-  { label: "Profile", path: "/profile", icon: "👤" },
-  { label: "Leaderboard", path: "/leaderboard", icon: "🏆" },
-  { label: "Tournaments", path: "/tournaments", icon: "⚔️" },
-];
+// ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const navigate = useNavigate();
+
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  // Fetch real stats from the profile endpoint.
+  // Errors are silent — stat cards fall back to "—" gracefully.
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        setStatsLoading(true);
+        const data = await getUserProfile();
+        setStats(data.stats);
+      } catch (err) {
+        // Non-fatal — home page still renders without stats.
+        console.error("Failed to fetch home stats:", err);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
+  // Stat card values — real data when available, "—" as fallback.
+  const statCards = [
+    {
+      label: "Matches Played",
+      value: statsLoading
+        ? null
+        : stats?.totalMatches ?? "—",
+    },
+    {
+      label: "Total Kills",
+      value: statsLoading
+        ? null
+        : stats?.totalKills ?? "—",
+    },
+    {
+      label: "Prize Earned",
+      value: statsLoading
+        ? null
+        : stats?.totalPrize > 0
+        ? `₹${stats.totalPrize.toLocaleString("en-IN")}`
+        : stats?.totalPrize === 0
+        ? "₹0"
+        : "—",
+    },
+  ];
+
+  const quickLinks = [
+    { label: "My Matches", path: "/my-matches", icon: "🎮" },
+    { label: "Profile", path: "/profile", icon: "👤" },
+    { label: "Leaderboard", path: "/leaderboard", icon: "🏆" },
+    { label: "Tournaments", path: "/tournaments", icon: "⚔️" },
+  ];
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -39,8 +78,8 @@ export default function Home() {
           <span className="text-[#1DB954]">Arena 🔥</span>
         </h1>
         <p className="text-white/40 mt-4 max-w-xl text-sm leading-relaxed">
-          Compete in Free Fire tournaments, earn prize money, and climb the
-          global leaderboard.
+          Compete in Free Fire tournaments, earn prize money, and climb
+          the global leaderboard.
         </p>
 
         {/* CTA buttons */}
@@ -62,7 +101,7 @@ export default function Home() {
 
       {/* ── Stats ─────────────────────────────────────────────────────── */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4 px-8 py-6">
-        {PLACEHOLDER_STATS.map((stat) => (
+        {statCards.map((stat) => (
           <motion.div
             key={stat.label}
             whileHover={{ y: -4 }}
@@ -71,11 +110,23 @@ export default function Home() {
             <p className="text-white/30 uppercase text-[10px] font-black tracking-widest">
               {stat.label}
             </p>
-            <h2 className="text-5xl font-black mt-3 text-white">
-              {stat.value}
-            </h2>
+
+            {/* Loading skeleton */}
+            {stat.value === null ? (
+              <div className="h-12 w-20 bg-white/5 rounded-lg animate-pulse mt-3" />
+            ) : (
+              <h2 className="text-5xl font-black mt-3 text-white">
+                {stat.value}
+              </h2>
+            )}
+
+            {/* Sub-label */}
             <p className="text-white/20 text-[10px] mt-2 uppercase tracking-widest">
-              Coming in Phase D
+              {statsLoading
+                ? "Loading..."
+                : stats
+                ? "From published results"
+                : "No results yet"}
             </p>
           </motion.div>
         ))}
@@ -87,7 +138,7 @@ export default function Home() {
           Quick Access
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {QUICK_LINKS.map((link) => (
+          {quickLinks.map((link) => (
             <button
               key={link.path}
               onClick={() => navigate(link.path)}

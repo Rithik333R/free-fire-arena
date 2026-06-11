@@ -1,6 +1,6 @@
 // frontend/src/pages/admin/CreateTournament.jsx
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { createTournament } from "../../api/tournaments.api";
 
@@ -20,16 +20,17 @@ const MATCH_CATEGORIES = [
   {
     value: "LONE_WOLF",
     label: "Lone Wolf",
-    description: "Solo players, 1v1 format",
+    description: "Solo 1v1 format",
   },
 ];
 
-// matchType options are only shown for CLASH_SQUAD and LONE_WOLF.
-// BATTLE_ROYALE does not use matchType — it is always a full room.
+// matchType options per category.
+// BATTLE_ROYALE and LONE_WOLF do not use matchType for slot derivation
+// but LONE_WOLF has a fixed 1v1 format.
 const MATCH_TYPES_BY_CATEGORY = {
   CLASH_SQUAD: ["1v1", "2v2", "3v3", "4v4"],
-  LONE_WOLF: ["1v1"],
-  BATTLE_ROYALE: [], // not applicable
+  LONE_WOLF: [],    // no format selector — always 2 slots
+  BATTLE_ROYALE: [], // no format selector — uses maxPlayers
 };
 
 const MAPS = ["Bermuda", "Kalahari", "Purgatory", "Alpine", "Nexterra"];
@@ -43,9 +44,23 @@ const DEFAULT_RULES = [
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Converts a local datetime-local input value to a UTC ISO string.
- * The datetime-local input returns local time — we store as ISO for the backend.
+ * deriveMaxPlayers — calculates slot count from matchCategory + matchType.
+ * Returns null when the admin should enter maxPlayers manually (BR only).
  */
+function deriveMaxPlayers(matchCategory, matchType) {
+  if (matchCategory === "LONE_WOLF") return 2;
+
+  if (matchCategory === "CLASH_SQUAD") {
+    const match = matchType?.match(/^(\d+)v\d+$/i);
+    if (!match) return null;
+    const teamSize = parseInt(match[1], 10);
+    return teamSize * 2;
+  }
+
+  // BATTLE_ROYALE — admin sets freely.
+  return null;
+}
+
 function toISOString(localDatetime) {
   if (!localDatetime) return null;
   return new Date(localDatetime).toISOString();
@@ -59,11 +74,10 @@ export default function CreateTournament() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Form state — matchCategory is now a first-class field.
   const [form, setForm] = useState({
     title: "",
     game: "Free Fire",
-    matchCategory: "CLASH_SQUAD",   // BUG-005 fix: included from the start
+    matchCategory: "CLASH_SQUAD",
     matchType: "4v4",
     map: "Bermuda",
     description: "",
@@ -72,25 +86,52 @@ export default function CreateTournament() {
     endTime: "",
     entryFee: 0,
     prizePool: "",
+    // maxPlayers is managed separately — derived for CS/LW, free for BR.
     maxPlayers: "",
+    // BR reward fields — only sent for BATTLE_ROYALE.
+    winnerPrize: "",
+    perKillReward: "",
   });
 
-  // Rules managed as a list of strings, not a single textarea.
   const [rules, setRules] = useState([...DEFAULT_RULES]);
   const [newRule, setNewRule] = useState("");
 
-  // ── Form handlers ──────────────────────────────────────────────────────
+  // Derived maxPlayers — recomputed when category or type changes.
+  const derivedMaxPlayers = deriveMaxPlayers(form.matchCategory, form.matchType);
+  const isBR = form.matchCategory === "BATTLE_ROYALE";
+  const isCS = form.matchCategory === "CLASH_SQUAD";
+  const isLW = form.matchCategory === "LONE_WOLF";
+  const showMatchType = isCS;
+  const showMaxPlayersInput = isBR; // only BR lets admin enter freely
+  const showRewardFields = isBR;
+
+  // Keep maxPlayers in sync with derived value for CS and LW.
+  useEffect(() => {
+    if (derivedMaxPlayers !== null) {
+      setForm((prev) => ({
+        ...prev,
+        maxPlayers: String(derivedMaxPlayers),
+      }));
+    }
+  }, [derivedMaxPlayers]);
+
+  // ── Form handlers ──────────────────────────────────────────────────
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => {
       const updated = { ...prev, [name]: value };
 
-      // When matchCategory changes, reset matchType to a valid value
-      // for the new category — or clear it for BATTLE_ROYALE.
+      // When matchCategory changes, reset matchType and reward fields.
       if (name === "matchCategory") {
         const types = MATCH_TYPES_BY_CATEGORY[value];
         updated.matchType = types.length > 0 ? types[0] : "";
+        updated.winnerPrize = "";
+        updated.perKillReward = "";
+        // maxPlayers will be recalculated by the useEffect above.
+        if (value === "BATTLE_ROYALE") {
+          updated.maxPlayers = "";
+        }
       }
 
       return updated;
@@ -115,7 +156,7 @@ export default function CreateTournament() {
     }
   };
 
-  // ── Validation ─────────────────────────────────────────────────────────
+  // ── Validation ─────────────────────────────────────────────────────
 
   const validate = () => {
     if (!form.title.trim()) return "Tournament title is required.";
@@ -124,19 +165,33 @@ export default function CreateTournament() {
 
     const start = new Date(form.startTime);
     const end = new Date(form.endTime);
-    if (end <= start) return "End time must be after start time.";
-    if (start <= new Date()) return "Start time must be in the future.";
 
-    if (!form.prizePool || Number(form.prizePool) <= 0)
+    if (start <= new Date()) return "Start time must be in the future.";
+    if (end <= start) return "End time must be after start time.";
+
+    if (!form.prizePool || Number(form.prizePool) <= 0) {
       return "Prize pool must be greater than 0.";
-    if (!form.maxPlayers || Number(form.maxPlayers) < 2)
-      return "Max players must be at least 2.";
+    }
+
+    // BR-specific validation.
+    if (isBR) {
+      if (!form.maxPlayers || Number(form.maxPlayers) < 2) {
+        return "Max players must be at least 2 for Battle Royale.";
+      }
+      if (form.winnerPrize === "" || Number(form.winnerPrize) < 0) {
+        return "Winner prize is required for Battle Royale.";
+      }
+      if (form.perKillReward === "" || Number(form.perKillReward) < 0) {
+        return "Per kill reward is required for Battle Royale.";
+      }
+    }
+
     if (rules.length === 0) return "At least one rule is required.";
 
     return null;
   };
 
-  // ── Submit ─────────────────────────────────────────────────────────────
+  // ── Submit ─────────────────────────────────────────────────────────
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -151,7 +206,6 @@ export default function CreateTournament() {
     setLoading(true);
 
     try {
-      // Build payload — only include matchType when it is applicable.
       const payload = {
         title: form.title.trim(),
         game: form.game,
@@ -167,11 +221,15 @@ export default function CreateTournament() {
         rules,
       };
 
-      // BUG-006 fix: only send matchType when the category supports it.
-      // BATTLE_ROYALE does not use matchType — omitting it lets the backend
-      // default apply without triggering a schema validation error.
-      if (form.matchCategory !== "BATTLE_ROYALE" && form.matchType) {
+      // matchType only sent for CLASH_SQUAD.
+      if (isCS && form.matchType) {
         payload.matchType = form.matchType;
+      }
+
+      // BR reward fields — required for BR, omitted for other modes.
+      if (isBR) {
+        payload.winnerPrize = Number(form.winnerPrize);
+        payload.perKillReward = Number(form.perKillReward);
       }
 
       await createTournament(payload);
@@ -187,12 +245,67 @@ export default function CreateTournament() {
     }
   };
 
-  // ── Derived ────────────────────────────────────────────────────────────
+  // ── Payout preview — shown in the Prize section ────────────────────
 
-  const matchTypes = MATCH_TYPES_BY_CATEGORY[form.matchCategory] ?? [];
-  const showMatchType = matchTypes.length > 0;
+  const renderPayoutPreview = () => {
+    if (isBR && form.prizePool && form.winnerPrize && form.perKillReward) {
+      const exampleKills = 5;
+      const exampleTotal =
+        Number(form.winnerPrize) +
+        exampleKills * Number(form.perKillReward);
+      return (
+        <div className="bg-[#1DB954]/5 border border-[#1DB954]/10 rounded-xl px-4 py-3 mt-2">
+          <p className="text-[#1DB954]/70 text-[10px] font-black uppercase tracking-widest mb-1">
+            Payout Preview
+          </p>
+          <p className="text-white/50 text-[10px]">
+            Winner (5 kills): ₹{exampleTotal.toLocaleString("en-IN")}
+          </p>
+          <p className="text-white/50 text-[10px]">
+            Kill only (3 kills): ₹
+            {(3 * Number(form.perKillReward)).toLocaleString("en-IN")}
+          </p>
+        </div>
+      );
+    }
 
-  // ── Render ─────────────────────────────────────────────────────────────
+    if (isCS && form.prizePool && form.matchType) {
+      const match = form.matchType.match(/^(\d+)v\d+$/i);
+      if (match) {
+        const teamSize = parseInt(match[1], 10);
+        const perPlayer = Math.floor(Number(form.prizePool) / teamSize);
+        return (
+          <div className="bg-[#1DB954]/5 border border-[#1DB954]/10 rounded-xl px-4 py-3 mt-2">
+            <p className="text-[#1DB954]/70 text-[10px] font-black uppercase tracking-widest mb-1">
+              Payout Preview
+            </p>
+            <p className="text-white/50 text-[10px]">
+              Winning team ({teamSize} players): ₹
+              {perPlayer.toLocaleString("en-IN")} per player
+            </p>
+          </div>
+        );
+      }
+    }
+
+    if (isLW && form.prizePool) {
+      return (
+        <div className="bg-[#1DB954]/5 border border-[#1DB954]/10 rounded-xl px-4 py-3 mt-2">
+          <p className="text-[#1DB954]/70 text-[10px] font-black uppercase tracking-widest mb-1">
+            Payout Preview
+          </p>
+          <p className="text-white/50 text-[10px]">
+            Winner takes all: ₹
+            {Number(form.prizePool).toLocaleString("en-IN")}
+          </p>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-12">
@@ -208,8 +321,7 @@ export default function CreateTournament() {
           </div>
           Back to Dashboard
         </button>
-
-        {/* Page header */}
+        
         <header className="mb-8">
           <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-[0.4em] mb-2">
             Admin · Create
@@ -221,13 +333,12 @@ export default function CreateTournament() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
 
-          {/* ── Section: Basic Info ─────────────────────────────────── */}
+          {/* ── Basic Info ──────────────────────────────────────────── */}
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-5">
             <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest">
               Basic Info
             </h2>
 
-            {/* Title */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
                 Tournament Title *
@@ -243,7 +354,6 @@ export default function CreateTournament() {
               />
             </div>
 
-            {/* Banner URL */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
                 Banner Image URL
@@ -258,7 +368,6 @@ export default function CreateTournament() {
               />
             </div>
 
-            {/* Description */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
                 Description
@@ -268,19 +377,19 @@ export default function CreateTournament() {
                 rows={3}
                 value={form.description}
                 onChange={handleChange}
-                placeholder="Brief description of the tournament..."
+                placeholder="Brief description..."
                 className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors resize-none"
               />
             </div>
           </div>
 
-          {/* ── Section: Match Mode ─────────────────────────────────── */}
+          {/* ── Match Mode ──────────────────────────────────────────── */}
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-5">
             <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest">
               Match Mode
             </h2>
 
-            {/* matchCategory — source of truth for tournament mode */}
+            {/* Category selector */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-3">
                 Category *
@@ -304,20 +413,22 @@ export default function CreateTournament() {
                     <p className="font-black text-xs uppercase tracking-widest mb-1">
                       {cat.label}
                     </p>
-                    <p className="text-[10px] opacity-60">{cat.description}</p>
+                    <p className="text-[10px] opacity-60">
+                      {cat.description}
+                    </p>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* matchType — only shown when applicable */}
+            {/* Match format — CS only */}
             {showMatchType && (
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
                   Match Format *
                 </label>
                 <div className="flex gap-3">
-                  {matchTypes.map((type) => (
+                  {MATCH_TYPES_BY_CATEGORY.CLASH_SQUAD.map((type) => (
                     <button
                       key={type}
                       type="button"
@@ -339,6 +450,20 @@ export default function CreateTournament() {
               </div>
             )}
 
+            {/* Slot count info */}
+            <div className="bg-black/40 rounded-xl p-4">
+              <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
+                Total Slots
+              </p>
+              <p className="text-white font-black text-sm">
+                {derivedMaxPlayers !== null
+                  ? `${derivedMaxPlayers} slots (auto-derived)`
+                  : form.maxPlayers
+                  ? `${form.maxPlayers} slots`
+                  : "Set max players below"}
+              </p>
+            </div>
+
             {/* Map */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
@@ -359,7 +484,7 @@ export default function CreateTournament() {
             </div>
           </div>
 
-          {/* ── Section: Schedule ───────────────────────────────────── */}
+          {/* ── Schedule ────────────────────────────────────────────── */}
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-5">
             <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest">
               Schedule
@@ -395,13 +520,19 @@ export default function CreateTournament() {
             </div>
           </div>
 
-          {/* ── Section: Prize & Capacity ────────────────────────────── */}
+          {/* ── Prize & Capacity ─────────────────────────────────────── */}
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-5">
             <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest">
               Prize & Capacity
             </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div
+              className={`grid gap-4 ${
+                showMaxPlayersInput
+                  ? "grid-cols-1 sm:grid-cols-3"
+                  : "grid-cols-1 sm:grid-cols-2"
+              }`}
+            >
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
                   Prize Pool (₹) *
@@ -417,6 +548,7 @@ export default function CreateTournament() {
                   className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
                 />
               </div>
+
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
                   Entry Fee (₹)
@@ -431,31 +563,84 @@ export default function CreateTournament() {
                   className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
                 />
               </div>
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
-                  Max Players *
-                </label>
-                <input
-                  type="number"
-                  name="maxPlayers"
-                  required
-                  min={2}
-                  value={form.maxPlayers}
-                  onChange={handleChange}
-                  placeholder="e.g. 48"
-                  className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
-                />
-              </div>
+
+              {/* Max players — BR only, free input */}
+              {showMaxPlayersInput && (
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                    Max Players *
+                  </label>
+                  <input
+                    type="number"
+                    name="maxPlayers"
+                    required
+                    min={2}
+                    value={form.maxPlayers}
+                    onChange={handleChange}
+                    placeholder="e.g. 48"
+                    className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+                  />
+                </div>
+              )}
             </div>
+
+            {/* BR reward fields */}
+            {showRewardFields && (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                      Winner Prize (₹) *
+                    </label>
+                    <input
+                      type="number"
+                      name="winnerPrize"
+                      required={isBR}
+                      min={0}
+                      value={form.winnerPrize}
+                      onChange={handleChange}
+                      placeholder="e.g. 200"
+                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+                    />
+                    <p className="text-white/20 text-[9px] mt-1">
+                      Flat prize for placement #1
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">
+                      Per Kill Reward (₹) *
+                    </label>
+                    <input
+                      type="number"
+                      name="perKillReward"
+                      required={isBR}
+                      min={0}
+                      value={form.perKillReward}
+                      onChange={handleChange}
+                      placeholder="e.g. 7"
+                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[#1DB954] transition-colors"
+                    />
+                    <p className="text-white/20 text-[9px] mt-1">
+                      Awarded per kill to all players
+                    </p>
+                  </div>
+                </div>
+
+                {/* Payout preview */}
+                {renderPayoutPreview()}
+              </div>
+            )}
+
+            {/* CS and LW payout preview */}
+            {!showRewardFields && renderPayoutPreview()}
           </div>
 
-          {/* ── Section: Rules ───────────────────────────────────────── */}
+          {/* ── Rules ────────────────────────────────────────────────── */}
           <div className="bg-[#121212] border border-white/5 rounded-2xl p-6 flex flex-col gap-4">
             <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest">
               Rules
             </h2>
 
-            {/* Existing rules list */}
             <div className="flex flex-col gap-2">
               {rules.map((rule, i) => (
                 <div
@@ -465,7 +650,9 @@ export default function CreateTournament() {
                   <span className="text-[#1DB954] font-black text-[10px] shrink-0">
                     {String(i + 1).padStart(2, "0")}.
                   </span>
-                  <span className="text-white/70 text-sm flex-1">{rule}</span>
+                  <span className="text-white/70 text-sm flex-1">
+                    {rule}
+                  </span>
                   <button
                     type="button"
                     onClick={() => removeRule(i)}
@@ -477,7 +664,6 @@ export default function CreateTournament() {
               ))}
             </div>
 
-            {/* Add new rule */}
             <div className="flex gap-3">
               <input
                 type="text"
@@ -497,7 +683,7 @@ export default function CreateTournament() {
             </div>
           </div>
 
-          {/* Error display */}
+          {/* Error */}
           {error && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-5 py-4">
               <p className="text-red-400 text-[11px] font-black uppercase tracking-widest">
@@ -506,7 +692,6 @@ export default function CreateTournament() {
             </div>
           )}
 
-          {/* Submit */}
           <button
             type="submit"
             disabled={loading}

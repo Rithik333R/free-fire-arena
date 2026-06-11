@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { getAdminTournaments, cancelTournament } from "../../api/admin.api";
+import { getTournamentSlots } from "../../api/tournaments.api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -63,11 +64,121 @@ function StatusBadge({ status }) {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────
+// ── Slot Viewer ────────────────────────────────────────────────────────────
+
+/**
+ * AdminSlotViewer — read-only slot occupancy grid for admin dashboard.
+ * Shows IGN per occupied slot. Grouped by team for CS tournaments.
+ */
+function AdminSlotViewer({ tournament, slotMap }) {
+  const { slots, totalSlots, availableCount } = slotMap;
+  const { matchCategory, participants } = tournament;
+
+  // Build a lookup: slotNumber → participant IGN.
+  const slotToIGN = {};
+  (participants ?? []).forEach((p) => {
+    if (p.slotNumber !== null && p.slotNumber !== undefined) {
+      slotToIGN[p.slotNumber] = p.ign;
+    }
+  });
+
+  const team1Slots = slots.filter((s) => s.teamNumber === 1);
+  const team2Slots = slots.filter((s) => s.teamNumber === 2);
+  const soloSlots = slots.filter((s) => s.teamNumber === null);
+
+  const renderSlotCell = (slot) => {
+    const ign = slotToIGN[slot.slotNumber];
+    const occupied = slot.occupied;
+
+    return (
+      <div
+        key={slot.slotNumber}
+        className={`rounded-xl border p-2 min-h-[52px] flex flex-col items-center justify-center gap-0.5 ${
+          occupied
+            ? "bg-[#1DB954]/5 border-[#1DB954]/20"
+            : "bg-black/20 border-white/5 opacity-40"
+        }`}
+      >
+        <span
+          className={`text-[10px] font-black ${
+            occupied ? "text-white/60" : "text-white/20"
+          }`}
+        >
+          {slot.slotNumber}
+        </span>
+        {occupied && ign ? (
+          <span className="text-[#1DB954] text-[9px] font-black truncate max-w-full px-1 text-center leading-tight">
+            {ign}
+          </span>
+        ) : occupied ? (
+          <span className="text-white/30 text-[9px]">—</span>
+        ) : (
+          <span className="text-white/10 text-[9px]">empty</span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-white/5 flex flex-col gap-4">
+      {/* Summary */}
+      <div className="flex items-center justify-between">
+        <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">
+          Slot Occupancy
+        </p>
+        <p className="text-white/40 text-[10px]">
+          {totalSlots - availableCount} / {totalSlots} filled
+        </p>
+      </div>
+
+      {/* CLASH SQUAD — two team columns */}
+      {matchCategory === "CLASH_SQUAD" && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-[#1DB954] text-[9px] font-black uppercase tracking-widest text-center">
+              Team 1
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {team1Slots.map((slot) => renderSlotCell(slot))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-blue-400 text-[9px] font-black uppercase tracking-widest text-center">
+              Team 2
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {team2Slots.map((slot) => renderSlotCell(slot))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BATTLE ROYALE — flat grid */}
+      {matchCategory === "BATTLE_ROYALE" && (
+        <div className="grid grid-cols-6 sm:grid-cols-8 gap-1.5">
+          {soloSlots.map((slot) => renderSlotCell(slot))}
+        </div>
+      )}
+
+      {/* LONE WOLF — two slots */}
+      {matchCategory === "LONE_WOLF" && (
+        <div className="grid grid-cols-2 gap-3">
+          {soloSlots.map((slot) => renderSlotCell(slot))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Tournament Admin Card ──────────────────────────────────────────────────
 
 function TournamentAdminCard({ tournament, onCancelSuccess }) {
   const navigate = useNavigate();
   const [canceling, setCanceling] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [slotMap, setSlotMap] = useState(null);
+  const [slotLoading, setSlotLoading] = useState(false);
+  const [slotError, setSlotError] = useState(null);
 
   const formattedDate = tournament.startTime
     ? new Date(tournament.startTime).toLocaleString("en-IN", {
@@ -80,7 +191,36 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
   const hasResults =
     Array.isArray(tournament.results) && tournament.results.length > 0;
 
-  // ── Cancel handler ───────────────────────────────────────────────
+  // Slot viewer is only relevant for active tournaments.
+  const showSlotViewer =
+    tournament.status === "UPCOMING" || tournament.status === "LIVE";
+
+  // ── Slot fetch ─────────────────────────────────────────────────────
+  const handleToggleSlots = async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+
+    setExpanded(true);
+
+    // Only fetch if we don't have data yet.
+    if (slotMap) return;
+
+    try {
+      setSlotLoading(true);
+      setSlotError(null);
+      const data = await getTournamentSlots(tournament._id);
+      setSlotMap(data);
+    } catch (err) {
+      console.error("Failed to fetch slot map:", err);
+      setSlotError("Could not load slot data.");
+    } finally {
+      setSlotLoading(false);
+    }
+  };
+
+  // ── Cancel handler ─────────────────────────────────────────────────
   const handleCancel = async () => {
     const confirmed = window.confirm(
       `Cancel "${tournament.title}"?\n\nThis cannot be undone. The tournament will be marked as CANCELED and hidden from the player lobby.`
@@ -100,10 +240,9 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     }
   };
 
-  // ── Lifecycle-aware action buttons ───────────────────────────────
+  // ── Action buttons ─────────────────────────────────────────────────
   const actions = [];
 
-  // Edit — available for non-final statuses.
   const isEditable =
     tournament.status === "UPCOMING" ||
     tournament.status === "LIVE" ||
@@ -119,7 +258,6 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     });
   }
 
-  // Set credentials — UPCOMING only.
   if (tournament.status === "UPCOMING") {
     actions.push({
       label: "Set Credentials",
@@ -130,7 +268,6 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     });
   }
 
-  // Publish results — AWAITING_RESULTS only.
   if (tournament.status === "AWAITING_RESULTS") {
     actions.push({
       label: "Publish Results",
@@ -141,7 +278,6 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     });
   }
 
-  // View results — COMPLETED with results.
   if (tournament.status === "COMPLETED" && hasResults) {
     actions.push({
       label: "View Results",
@@ -152,7 +288,6 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     });
   }
 
-  // Add results — COMPLETED without results (pre-B2 edge case).
   if (tournament.status === "COMPLETED" && !hasResults) {
     actions.push({
       label: "Add Results",
@@ -163,6 +298,7 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     });
   }
 
+  // ── Render ─────────────────────────────────────────────────────────
   return (
     <div
       className={`bg-[#121212] border rounded-2xl p-6 flex flex-col gap-4 transition-all ${
@@ -227,7 +363,44 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
         </div>
       )}
 
-      {/* Cancel button — separate from action row, destructive styling */}
+      {/* Slot viewer toggle — UPCOMING and LIVE only */}
+      {showSlotViewer && (
+        <button
+          onClick={handleToggleSlots}
+          className="w-full text-[10px] font-black uppercase tracking-widest py-2 rounded-xl border border-white/5 text-white/30 hover:text-white/60 hover:border-white/10 transition-all flex items-center justify-center gap-2"
+        >
+          <span>{expanded ? "▲ Hide Slots" : "▼ View Slots"}</span>
+          {!expanded && participantCount > 0 && (
+            <span className="text-white/20">
+              ({participantCount} registered)
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Slot viewer content */}
+      {expanded && showSlotViewer && (
+        <>
+          {slotLoading && (
+            <div className="flex items-center justify-center py-6">
+              <div className="w-5 h-5 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+          {slotError && (
+            <p className="text-red-400/60 text-[10px] font-black uppercase tracking-widest text-center py-4">
+              {slotError}
+            </p>
+          )}
+          {slotMap && !slotLoading && (
+            <AdminSlotViewer
+              tournament={tournament}
+              slotMap={slotMap}
+            />
+          )}
+        </>
+      )}
+
+      {/* Cancel button */}
       {tournament.status === "UPCOMING" && (
         <button
           onClick={handleCancel}
@@ -240,6 +413,8 @@ function TournamentAdminCard({ tournament, onCancelSuccess }) {
     </div>
   );
 }
+
+// ── Summary Card ───────────────────────────────────────────────────────────
 
 function SummaryCard({ label, value, accent, urgent }) {
   return (
@@ -279,7 +454,6 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Extracted as named function so it can be called after cancel.
   const fetchTournaments = useCallback(async () => {
     try {
       setError(null);
@@ -291,7 +465,6 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  // Initial load.
   useEffect(() => {
     const initialLoad = async () => {
       setLoading(true);
@@ -301,13 +474,11 @@ export default function AdminDashboard() {
     initialLoad();
   }, [fetchTournaments]);
 
-  // Client-side filter by status.
   const filtered =
     activeFilter === "ALL"
       ? tournaments
       : tournaments.filter((t) => t.status === activeFilter);
 
-  // Summary counts.
   const counts = {
     total: tournaments.length,
     live: tournaments.filter((t) => t.status === "LIVE").length,

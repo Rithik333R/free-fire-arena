@@ -110,6 +110,18 @@ export default function App() {
               }
             />
 
+            {/* ── Public routes ────────────────────────────────────── */}
+            {/*
+              Results page is intentionally public — no RequireAuth.
+              MatchResults uses GET /api/tournaments/:id/results which
+              requires no authentication. Logged-out users can view
+              completed match results directly via URL.
+            */}
+            <Route
+              path="/tournaments/:id/results"
+              element={<MatchResults />}
+            />
+
             {/* ── Authenticated player routes ──────────────────────── */}
             <Route
               path="/"
@@ -132,14 +144,6 @@ export default function App() {
               element={
                 <RequireAuth>
                   <TournamentDetail />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/tournaments/:id/results"
-              element={
-                <RequireAuth>
-                  <MatchResults />
                 </RequireAuth>
               }
             />

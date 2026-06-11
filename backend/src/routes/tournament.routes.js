@@ -4,6 +4,15 @@ import express from "express";
 import Tournament from "../models/Tournament.js";
 import authMiddleware from "../middleware/auth.middleware.js";
 import adminMiddleware from "../middleware/admin.middleware.js";
+import {
+  getSlotCount,
+  getTeamNumber,
+  validateSlotNumber,
+  calculateBRPrizes,
+  calculateCSPrizes,
+  calculateLWPrize,
+  getTeamSize,
+} from "../constants/tournamentRules.js";
 
 const router = express.Router();
 
@@ -17,14 +26,8 @@ const VALID_MATCH_TYPES = [
 
 function validateTournamentBody(body) {
   const {
-    title,
-    matchCategory,
-    matchType,
-    startTime,
-    endTime,
-    prizePool,
-    maxPlayers,
-    entryFee,
+    title, matchCategory, matchType,
+    startTime, endTime, prizePool, maxPlayers, entryFee,
   } = body;
 
   if (!title || typeof title !== "string" || !title.trim()) {
@@ -102,12 +105,72 @@ function validateCredentialsBody(body) {
   return null;
 }
 
+function validateBRResultPayload(body) {
+  const { winner, killRewardPlayers } = body;
+
+  if (!winner || typeof winner !== "object") {
+    return "winner is required for Battle Royale results.";
+  }
+  if (!winner.ign || typeof winner.ign !== "string" || !winner.ign.trim()) {
+    return "winner.ign is required.";
+  }
+  if (winner.kills === undefined || winner.kills === null) {
+    return "winner.kills is required.";
+  }
+  if (isNaN(Number(winner.kills)) || Number(winner.kills) < 0) {
+    return "winner.kills must be a non-negative number.";
+  }
+  if (killRewardPlayers !== undefined) {
+    if (!Array.isArray(killRewardPlayers)) {
+      return "killRewardPlayers must be an array.";
+    }
+    for (const p of killRewardPlayers) {
+      if (!p.ign || typeof p.ign !== "string" || !p.ign.trim()) {
+        return "Each killRewardPlayer must have a valid ign.";
+      }
+      if (p.kills === undefined || p.kills === null) {
+        return "Each killRewardPlayer must have a kills value.";
+      }
+      if (isNaN(Number(p.kills)) || Number(p.kills) < 0) {
+        return "Each killRewardPlayer.kills must be a non-negative number.";
+      }
+    }
+  }
+
+  return null;
+}
+
+function validateCSResultPayload(body) {
+  const { winningTeamNumber } = body;
+
+  if (winningTeamNumber === undefined || winningTeamNumber === null) {
+    return "winningTeamNumber is required for Clash Squad results.";
+  }
+  const n = Number(winningTeamNumber);
+  if (!Number.isInteger(n) || n < 1 || n > 2) {
+    return "winningTeamNumber must be 1 or 2.";
+  }
+
+  return null;
+}
+
+function validateLWResultPayload(body) {
+  const { winner } = body;
+
+  if (!winner || typeof winner !== "object") {
+    return "winner is required for Lone Wolf results.";
+  }
+  if (!winner.ign || typeof winner.ign !== "string" || !winner.ign.trim()) {
+    return "winner.ign is required.";
+  }
+
+  return null;
+}
+
 // ── Public routes ──────────────────────────────────────────────────────────
 
 // GET /api/tournaments
-// Public: returns all non-canceled tournaments sorted by start time.
-// CANCELED tournaments are excluded — they are admin-only and should
-// never appear in the player lobby.
+// Public: all non-canceled tournaments.
 router.get("/", async (req, res) => {
   try {
     const tournaments = await Tournament.find({
@@ -122,9 +185,6 @@ router.get("/", async (req, res) => {
 // ── Authenticated player routes ────────────────────────────────────────────
 
 // GET /api/tournaments/registered
-// Secure: returns only tournaments the logged-in user has joined.
-// Includes CANCELED — player should see if their tournament was canceled.
-// NOTE: Declared before /:id to prevent "registered" matching as an ID.
 router.get("/registered", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -137,16 +197,104 @@ router.get("/registered", authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/tournaments/:id/slots
+router.get("/:id/slots", authMiddleware, async (req, res) => {
+  try {
+    const tournament = await Tournament.findById(req.params.id);
+    if (!tournament) {
+      return res.status(404).json({ message: "Tournament not found." });
+    }
+
+    const userId = req.user.id;
+    const totalSlots = getSlotCount(
+      tournament.matchCategory,
+      tournament.matchType,
+      tournament.maxPlayers
+    );
+
+    if (totalSlots === 0) {
+      return res.status(400).json({
+        message: "Cannot determine slot count for this tournament configuration.",
+      });
+    }
+
+    const occupiedSlots = new Set(
+      tournament.participants
+        .filter((p) => p.slotNumber !== null && p.slotNumber !== undefined)
+        .map((p) => p.slotNumber)
+    );
+
+    const myParticipant = tournament.participants.find(
+      (p) => p.user.toString() === userId.toString()
+    );
+    const mySlot = myParticipant?.slotNumber ?? null;
+
+    const slots = Array.from({ length: totalSlots }, (_, i) => {
+      const slotNumber = i + 1;
+      const teamNumber = getTeamNumber(
+        tournament.matchCategory,
+        tournament.matchType,
+        slotNumber
+      );
+      return {
+        slotNumber,
+        occupied: occupiedSlots.has(slotNumber),
+        teamNumber,
+      };
+    });
+
+    const availableCount = slots.filter((s) => !s.occupied).length;
+    res.json({ totalSlots, slots, availableCount, mySlot });
+  } catch (err) {
+    console.error("Error fetching slot map:", err);
+    res.status(500).json({ message: "Failed to fetch slot map." });
+  }
+});
+
+// GET /api/tournaments/:id/results
+// PUBLIC — no auth required.
+// Returns only the public-safe fields needed for the results page.
+// Never includes room credentials or private participant data.
+// Declared before GET /:id to ensure Express matches it correctly.
+router.get("/:id/results", async (req, res) => {
+  try {
+    const tournament = await Tournament.findById(req.params.id).select(
+      "_id title matchCategory matchType map status startTime endTime prizePool results"
+    );
+
+    if (!tournament) {
+      return res.status(404).json({ message: "Tournament not found." });
+    }
+
+    // Sanitize result rows — remove internal user ObjectIds from
+    // the public response. Players see IGN, rank, kills, prize only.
+    const publicResults = (tournament.results ?? []).map((r) => ({
+      rank: r.rank,
+      ign: r.ign,
+      kills: r.kills,
+      prize: r.prize,
+    }));
+
+    res.json({
+      _id: tournament._id,
+      title: tournament.title,
+      matchCategory: tournament.matchCategory,
+      matchType: tournament.matchType,
+      map: tournament.map,
+      status: tournament.status,
+      startTime: tournament.startTime,
+      endTime: tournament.endTime,
+      prizePool: tournament.prizePool,
+      results: publicResults,
+    });
+  } catch (err) {
+    console.error("Error fetching public results:", err);
+    res.status(500).json({ message: "Failed to fetch results." });
+  }
+});
+
 // GET /api/tournaments/:id
-// Secure: returns full tournament detail with structured credential reveal.
-//
-// Response shape:
-// {
-//   ...tournamentFields,
-//   credentialsRevealed: boolean,
-//   roomId?: string,
-//   roomPassword?: string,
-// }
+// Secure: full tournament detail with credential reveal.
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -188,7 +336,6 @@ router.get("/:id", authMiddleware, async (req, res) => {
 });
 
 // POST /api/tournaments/:id/join
-// Secure: allows an authenticated player to join an upcoming tournament.
 router.post("/:id/join", authMiddleware, async (req, res) => {
   try {
     const joinError = validateJoinBody(req.body);
@@ -196,7 +343,7 @@ router.post("/:id/join", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: joinError });
     }
 
-    const { ign, uid } = req.body;
+    const { ign, uid, slotNumber } = req.body;
     const tournament = await Tournament.findById(req.params.id);
 
     if (!tournament || tournament.status !== "UPCOMING") {
@@ -224,23 +371,58 @@ router.post("/:id/join", authMiddleware, async (req, res) => {
       });
     }
 
+    const totalSlots = getSlotCount(
+      tournament.matchCategory,
+      tournament.matchType,
+      tournament.maxPlayers
+    );
+
+    const slotError = validateSlotNumber(slotNumber, totalSlots);
+    if (slotError) {
+      return res.status(400).json({ message: slotError });
+    }
+
+    const slotNum = Number(slotNumber);
+
+    const slotOccupied = tournament.participants.some(
+      (p) => p.slotNumber === slotNum
+    );
+    if (slotOccupied) {
+      return res.status(400).json({
+        message: `Slot ${slotNum} is already taken. Please select another slot.`,
+      });
+    }
+
+    const teamNumber = getTeamNumber(
+      tournament.matchCategory,
+      tournament.matchType,
+      slotNum
+    );
+
     tournament.participants.push({
       user: req.user.id,
       ign: ign.trim(),
       uid: uid.trim(),
+      slotNumber: slotNum,
+      teamNumber,
     });
+
     await tournament.save();
 
-    res.status(200).json({ success: true, message: "Registered successfully!" });
+    res.status(200).json({
+      success: true,
+      message: "Registered successfully!",
+      slotNumber: slotNum,
+      teamNumber,
+    });
   } catch (error) {
+    console.error("Join error:", error);
     res.status(500).json({ message: "Join failed." });
   }
 });
 
 // ── Admin routes ───────────────────────────────────────────────────────────
 
-// POST /api/tournaments
-// Admin: creates a new tournament.
 router.post("/", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const validationError = validateTournamentBody(req.body);
@@ -257,8 +439,6 @@ router.post("/", authMiddleware, adminMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/tournaments/:id/credentials
-// Admin: injects room ID and password for a tournament.
 router.put(
   "/:id/credentials",
   authMiddleware,
@@ -274,10 +454,7 @@ router.put(
 
       const updatedMatch = await Tournament.findByIdAndUpdate(
         req.params.id,
-        {
-          roomId: roomId.trim(),
-          roomPassword: roomPassword.trim(),
-        },
+        { roomId: roomId.trim(), roomPassword: roomPassword.trim() },
         { new: true }
       );
 
@@ -296,35 +473,12 @@ router.put(
   }
 );
 
-// PUT /api/tournaments/:id/results
-// Admin: publishes final results and moves tournament to COMPLETED.
-//
-// State machine:
-//   AWAITING_RESULTS → COMPLETED
-//   COMPLETED → COMPLETED (result correction)
 router.put(
   "/:id/results",
   authMiddleware,
   adminMiddleware,
   async (req, res) => {
     try {
-      const { results } = req.body;
-
-      if (!Array.isArray(results) || results.length === 0) {
-        return res.status(400).json({
-          message: "Results must be a non-empty array.",
-        });
-      }
-
-      const invalidRow = results.some(
-        (r) => !r.ign || typeof r.ign !== "string" || !r.ign.trim()
-      );
-      if (invalidRow) {
-        return res.status(400).json({
-          message: "Each result entry must have a valid IGN.",
-        });
-      }
-
       const tournament = await Tournament.findById(req.params.id);
       if (!tournament) {
         return res.status(404).json({ message: "Tournament not found." });
@@ -337,19 +491,110 @@ router.put(
         });
       }
 
-      tournament.results = results.map((r) => ({
-        rank: r.rank,
-        user: r.user ?? null,
-        ign: r.ign.trim(),
-        uid: r.uid ?? null,
-        kills: r.kills ?? 0,
-        prize: r.prize ?? 0,
-      }));
+      const { matchCategory, matchType, prizePool, winnerPrize, perKillReward } =
+        tournament;
 
+      let computedResults = [];
+
+      if (matchCategory === "BATTLE_ROYALE") {
+        const payloadError = validateBRResultPayload(req.body);
+        if (payloadError) {
+          return res.status(400).json({ message: payloadError });
+        }
+
+        const { winner, killRewardPlayers = [] } = req.body;
+
+        const winnerRow = {
+          rank: "1",
+          user: winner.user ?? null,
+          ign: winner.ign.trim(),
+          uid: winner.uid ?? null,
+          kills: Number(winner.kills),
+        };
+
+        const killRows = killRewardPlayers
+          .filter((p) => Number(p.kills) > 0)
+          .sort((a, b) => Number(b.kills) - Number(a.kills))
+          .map((p, i) => ({
+            rank: String(i + 2),
+            user: p.user ?? null,
+            ign: p.ign.trim(),
+            uid: p.uid ?? null,
+            kills: Number(p.kills),
+          }));
+
+        computedResults = calculateBRPrizes(
+          [winnerRow, ...killRows],
+          winnerPrize ?? 0,
+          perKillReward ?? 0
+        );
+      } else if (matchCategory === "CLASH_SQUAD") {
+        const payloadError = validateCSResultPayload(req.body);
+        if (payloadError) {
+          return res.status(400).json({ message: payloadError });
+        }
+
+        const { winningTeamNumber } = req.body;
+        const teamNum = Number(winningTeamNumber);
+
+        const winningTeamParticipants = tournament.participants.filter(
+          (p) => p.teamNumber === teamNum
+        );
+
+        if (winningTeamParticipants.length === 0) {
+          return res.status(400).json({
+            message: `No participants found for team ${teamNum}.`,
+          });
+        }
+
+        const expectedTeamSize = getTeamSize(matchType);
+        if (
+          expectedTeamSize &&
+          winningTeamParticipants.length !== expectedTeamSize
+        ) {
+          return res.status(400).json({
+            message: `Team ${teamNum} has ${winningTeamParticipants.length} player(s) but ${matchType} requires ${expectedTeamSize}.`,
+          });
+        }
+
+        computedResults = calculateCSPrizes(
+          winningTeamParticipants,
+          prizePool,
+          matchType
+        );
+      } else if (matchCategory === "LONE_WOLF") {
+        const payloadError = validateLWResultPayload(req.body);
+        if (payloadError) {
+          return res.status(400).json({ message: payloadError });
+        }
+
+        const { winner } = req.body;
+        computedResults = [
+          calculateLWPrize(
+            {
+              user: winner.user ?? null,
+              ign: winner.ign.trim(),
+              uid: winner.uid ?? null,
+            },
+            prizePool
+          ),
+        ];
+      } else {
+        return res.status(400).json({
+          message: `Unsupported matchCategory: ${matchCategory}.`,
+        });
+      }
+
+      tournament.results = computedResults;
       tournament.status = "COMPLETED";
       await tournament.save();
 
-      res.status(200).json(tournament);
+      res.status(200).json({
+        success: true,
+        message: "Results published successfully.",
+        results: computedResults,
+        tournament,
+      });
     } catch (err) {
       console.error("Error publishing results:", err);
       res.status(500).json({ error: "Failed to publish results." });

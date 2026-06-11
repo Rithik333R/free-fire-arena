@@ -6,10 +6,13 @@ import { getAllTournaments } from "../api/tournaments.api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-// CANCELED is intentionally excluded from player-facing filter tabs.
-// The backend already excludes CANCELED from GET /api/tournaments.
-// This list only contains statuses players should be able to filter by.
-const STATUS_FILTERS = ["ALL", "LIVE", "UPCOMING", "AWAITING_RESULTS", "COMPLETED"];
+const STATUS_FILTERS = [
+  "ALL",
+  "LIVE",
+  "UPCOMING",
+  "AWAITING_RESULTS",
+  "COMPLETED",
+];
 
 const STATUS_CONFIG = {
   LIVE: {
@@ -29,8 +32,6 @@ const STATUS_CONFIG = {
     label: "COMPLETED",
     classes: "bg-white/10 text-white/50 border border-white/10",
   },
-  // Defensive entry — CANCELED should never appear in the player lobby
-  // because the backend excludes it. This badge is a safety fallback only.
   CANCELED: {
     label: "CANCELED",
     classes: "bg-red-900/20 text-red-600 border border-red-900/30",
@@ -44,6 +45,47 @@ const FILTER_LABELS = {
   AWAITING_RESULTS: "Pending Results",
   COMPLETED: "Completed",
 };
+
+/**
+ * getPayoutLine — returns a compact single-line payout summary
+ * for display on tournament cards.
+ * Informational only — does not affect any calculation.
+ */
+function getPayoutLine(tournament) {
+  const {
+    matchCategory,
+    matchType,
+    prizePool,
+    winnerPrize,
+    perKillReward,
+  } = tournament;
+
+  if (matchCategory === "BATTLE_ROYALE") {
+    // Only show if reward fields are configured (D+ tournaments).
+    if (!winnerPrize && !perKillReward) {
+      return `🏆 ₹${prizePool?.toLocaleString("en-IN")} prize pool`;
+    }
+    return `🏆 ₹${(winnerPrize ?? 0).toLocaleString("en-IN")} + ₹${
+      perKillReward ?? 0
+    }/kill`;
+  }
+
+  if (matchCategory === "CLASH_SQUAD") {
+    const match = matchType?.match(/^(\d+)v\d+$/i);
+    if (match && prizePool) {
+      const teamSize = parseInt(match[1], 10);
+      const perPlayer = Math.floor(prizePool / teamSize);
+      return `🏆 ₹${perPlayer.toLocaleString("en-IN")}/player (${matchType})`;
+    }
+    return `🏆 ₹${prizePool?.toLocaleString("en-IN")} prize pool`;
+  }
+
+  if (matchCategory === "LONE_WOLF") {
+    return `🏆 ₹${prizePool?.toLocaleString("en-IN")} winner takes all`;
+  }
+
+  return `🏆 ₹${prizePool?.toLocaleString("en-IN")} prize pool`;
+}
 
 function StatusBadge({ status }) {
   const config = STATUS_CONFIG[status] ?? {
@@ -74,6 +116,7 @@ function TournamentCard({ tournament }) {
   const spotsLeft =
     tournament.maxPlayers - (tournament.participants?.length ?? 0);
   const isFull = spotsLeft <= 0;
+  const payoutLine = getPayoutLine(tournament);
 
   return (
     <div className="bg-[#121212] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-all flex flex-col">
@@ -125,7 +168,7 @@ function TournamentCard({ tournament }) {
           </div>
           <div className="bg-black/40 rounded-xl p-3">
             <p className="text-white/30 text-[9px] font-black uppercase tracking-widest mb-1">
-              Spots Left
+              Slots Left
             </p>
             <p
               className={`text-[11px] font-black ${
@@ -137,6 +180,16 @@ function TournamentCard({ tournament }) {
                 : `${spotsLeft} / ${tournament.maxPlayers}`}
             </p>
           </div>
+        </div>
+
+        {/* Payout preview line */}
+        <div className="flex items-center justify-between border-t border-white/5 pt-3">
+          <span className="text-white/30 text-[10px] uppercase tracking-widest font-black">
+            Payout
+          </span>
+          <span className="text-[#1DB954]/80 text-[11px] font-black">
+            {payoutLine}
+          </span>
         </div>
 
         {/* Entry fee */}
@@ -215,13 +268,11 @@ export default function Tournaments() {
     fetchTournaments();
   }, []);
 
-  // Client-side filter — backend already excludes CANCELED.
   const filtered =
     activeFilter === "ALL"
       ? tournaments
       : tournaments.filter((t) => t.status === activeFilter);
 
-  // Count per status for filter tab badges.
   const counts = STATUS_FILTERS.reduce((acc, f) => {
     acc[f] =
       f === "ALL"
@@ -268,7 +319,6 @@ export default function Tournaments() {
     <div className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-5xl mx-auto">
 
-        {/* Page header */}
         <header className="mb-8">
           <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-[0.4em] mb-2">
             Arena Lobby
@@ -278,7 +328,6 @@ export default function Tournaments() {
           </h1>
         </header>
 
-        {/* Filter tabs */}
         <div className="flex flex-wrap gap-2 mb-8">
           {STATUS_FILTERS.map((f) => (
             <FilterTab
@@ -291,7 +340,6 @@ export default function Tournaments() {
           ))}
         </div>
 
-        {/* Tournament grid or empty state */}
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <p className="text-white/30 text-sm font-black uppercase tracking-widest">

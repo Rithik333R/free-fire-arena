@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getTournamentById } from "../api/tournaments.api";
+import { getTournamentResults } from "../api/tournaments.api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -51,14 +51,17 @@ function PodiumCard({ result, index }) {
         </span>
       </div>
       <div className="text-center">
-        <p className={`font-black uppercase tracking-tight text-sm ${config.nameColor}`}>
+        <p
+          className={`font-black uppercase tracking-tight text-sm ${config.nameColor}`}
+        >
           {result.ign ?? "Unknown"}
         </p>
-        {result.kills !== undefined && result.kills !== null && (
-          <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">
-            {result.kills} kills
-          </p>
-        )}
+        {result.kills !== undefined &&
+          result.kills !== null && (
+            <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">
+              {result.kills} kills
+            </p>
+          )}
         {result.prize > 0 && (
           <p className="text-[#1DB954] text-[10px] font-black mt-0.5">
             ₹{result.prize.toLocaleString("en-IN")}
@@ -86,12 +89,14 @@ function ResultRow({ result, rank }) {
 
   return (
     <div className="flex items-center gap-4 bg-[#121212] border border-white/5 rounded-xl px-5 py-4 hover:border-white/10 transition-all">
-      {/* Rank */}
-      <span className={`w-6 text-center font-black text-sm shrink-0 ${rankColor}`}>
+      {/* Rank number */}
+      <span
+        className={`w-6 text-center font-black text-sm shrink-0 ${rankColor}`}
+      >
         {rank}
       </span>
 
-      {/* IGN avatar placeholder */}
+      {/* IGN avatar */}
       <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
         <span className="text-[10px] font-black text-white/40">
           {result.ign?.slice(0, 2).toUpperCase() ?? "??"}
@@ -104,7 +109,9 @@ function ResultRow({ result, rank }) {
           {result.ign ?? "Unknown Player"}
         </p>
         {result.rank && (
-          <p className="text-white/30 text-[10px]">Placement: {result.rank}</p>
+          <p className="text-white/30 text-[10px]">
+            Placement: {result.rank}
+          </p>
         )}
       </div>
 
@@ -112,7 +119,9 @@ function ResultRow({ result, rank }) {
       <div className="flex gap-6 shrink-0">
         {result.kills !== undefined && result.kills !== null && (
           <div className="text-right">
-            <p className="text-white font-black text-sm">{result.kills}</p>
+            <p className="text-white font-black text-sm">
+              {result.kills}
+            </p>
             <p className="text-white/30 text-[9px] uppercase tracking-widest">
               Kills
             </p>
@@ -143,8 +152,8 @@ function NoResults() {
         Results Pending
       </h3>
       <p className="text-white/30 text-xs max-w-xs">
-        The admin has not published results for this tournament yet. Check back
-        after the match ends.
+        The admin has not published results for this tournament yet.
+        Check back after the match ends.
       </p>
     </div>
   );
@@ -163,11 +172,12 @@ export default function MatchResults() {
   useEffect(() => {
     if (!id) return;
 
-    const fetchMatch = async () => {
+    const fetchResults = async () => {
       try {
         setLoading(true);
         setError(null);
-        const data = await getTournamentById(id);
+        // D3 fix — uses public endpoint, no auth required.
+        const data = await getTournamentResults(id);
         setMatch(data);
       } catch (err) {
         console.error("Failed to fetch match results:", err);
@@ -177,10 +187,10 @@ export default function MatchResults() {
       }
     };
 
-    fetchMatch();
+    fetchResults();
   }, [id]);
 
-  // ── Render: loading ──────────────────────────────────────────────────────
+  // ── Render: loading ────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -194,7 +204,7 @@ export default function MatchResults() {
     );
   }
 
-  // ── Render: error ────────────────────────────────────────────────────────
+  // ── Render: error ──────────────────────────────────────────────────
   if (error) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-6">
@@ -213,18 +223,21 @@ export default function MatchResults() {
     );
   }
 
-  // ── Render: not found ────────────────────────────────────────────────────
   if (!match) return null;
 
-  const hasResults = Array.isArray(match.results) && match.results.length > 0;
+  const hasResults =
+    Array.isArray(match.results) && match.results.length > 0;
   const top3 = hasResults ? match.results.slice(0, 3) : [];
   const categoryLabel =
-    CATEGORY_LABELS[match.matchCategory] ?? match.matchCategory ?? "Tournament";
+    CATEGORY_LABELS[match.matchCategory] ??
+    match.matchCategory ??
+    "Tournament";
 
-  // ── Render: main ─────────────────────────────────────────────────────────
+  // ── Render: main ───────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto">
+
         {/* Back button */}
         <button
           onClick={() => navigate(-1)}
@@ -236,7 +249,7 @@ export default function MatchResults() {
           Back
         </button>
 
-        {/* Page header */}
+        {/* Header */}
         <header className="mb-10">
           <p className="text-[#1DB954] text-[10px] font-black uppercase tracking-[0.4em] mb-2">
             {categoryLabel} · Final Results
@@ -255,7 +268,7 @@ export default function MatchResults() {
           )}
         </header>
 
-        {/* Results or pending state */}
+        {/* Results or pending */}
         {!hasResults ? (
           <NoResults />
         ) : (
@@ -269,7 +282,7 @@ export default function MatchResults() {
               </div>
             )}
 
-            {/* Full results list */}
+            {/* Full standings */}
             <div className="flex flex-col gap-3">
               <h2 className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-2">
                 Full Standings
